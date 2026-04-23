@@ -2,20 +2,12 @@ import { ethers } from "ethers";
 import { ADDRESSES, ERC20_ABI, WETH_ABI, SWAP_ROUTER_ABI, QUOTER_V2_ABI } from "./constants.js";
 import { formatAmount, applySlippage, txLink } from "./utils.js";
 
-// Info hardcoded untuk token yang kontraknya tidak standard
+// Data hardcoded untuk token-token di Base
 const TOKEN_OVERRIDES = {
-  [ADDRESSES.TOKENS.WETH.toLowerCase()]: {
-    name: "Wrapped Ether", symbol: "WETH", decimals: 18,
-  },
-  [ADDRESSES.TOKENS.USDC.toLowerCase()]: {
-    name: "USD Coin", symbol: "USDC", decimals: 6,
-  },
-  [ADDRESSES.TOKENS.USDT.toLowerCase()]: {
-    name: "Tether USD", symbol: "USDT", decimals: 6,
-  },
-  [ADDRESSES.TOKENS.DAI.toLowerCase()]: {
-    name: "Dai Stablecoin", symbol: "DAI", decimals: 18,
-  },
+  [ADDRESSES.TOKENS.WETH.toLowerCase()]: { name: "Wrapped Ether", symbol: "WETH", decimals: 18 },
+  [ADDRESSES.TOKENS.USDC.toLowerCase()]: { name: "USD Coin",      symbol: "USDC", decimals: 6  },
+  [ADDRESSES.TOKENS.USDT.toLowerCase()]: { name: "Tether USD",    symbol: "USDT", decimals: 6  },
+  [ADDRESSES.TOKENS.DAI.toLowerCase()]:  { name: "Dai",           symbol: "DAI",  decimals: 18 },
 };
 
 export class BaseSwapper {
@@ -27,7 +19,7 @@ export class BaseSwapper {
   }
 
   async getTokenInfo(tokenAddress) {
-    // Handle ETH native
+    // ── ETH Native ──────────────────────────────────────────
     if (tokenAddress.toLowerCase() === "native") {
       const balance = await this.provider.getBalance(this.wallet.address);
       return { name: "Ethereum", symbol: "ETH", decimals: 18, balance, isNative: true };
@@ -35,13 +27,36 @@ export class BaseSwapper {
 
     const key      = tokenAddress.toLowerCase();
     const override = TOKEN_OVERRIDES[key];
-    const token    = new ethers.Contract(tokenAddress, ERC20_ABI, this.wallet);
 
-    // Ambil saldo dulu (ini selalu ada)
-    const balance = await token.balanceOf(this.wallet.address);
+    // ── WETH: gunakan eth_call manual ───────────────────────
+    // Kontrak WETH predeploy Base kadang gagal via Contract biasa
+    const isWETH = key === ADDRESSES.TOKENS.WETH.toLowerCase();
 
+    let balance = 0n;
+
+    if (isWETH) {
+      // Panggil balanceOf via provider.call langsung (lebih andal)
+      try {
+        const iface  = new ethers.Interface(["function balanceOf(address) view returns (uint256)"]);
+        const data   = iface.encodeFunctionData("balanceOf", [this.wallet.address]);
+        const result = await this.provider.call({ to: tokenAddress, data });
+        balance = iface.decodeFunctionResult("balanceOf", result)[0];
+      } catch {
+        // Fallback: anggap saldo 0
+        balance = 0n;
+      }
+    } else {
+      // Token ERC20 biasa
+      try {
+        const token = new ethers.Contract(tokenAddress, ERC20_ABI, this.provider);
+        balance = await token.balanceOf(this.wallet.address);
+      } catch {
+        balance = 0n;
+      }
+    }
+
+    // Jika ada override, pakai data hardcoded
     if (override) {
-      // Pakai data hardcoded, skip panggil name()/symbol()/decimals()
       return {
         name:     override.name,
         symbol:   override.symbol,
@@ -52,14 +67,14 @@ export class BaseSwapper {
       };
     }
 
-    // Token tidak dikenal — coba ambil dari kontrak dengan fallback
-    let name     = "Unknown";
-    let symbol   = "???";
-    let decimals = 18;
-
-    try { name     = await token.name();                } catch {}
-    try { symbol   = await token.symbol();              } catch {}
-    try { decimals = Number(await token.decimals());    } catch {}
+    // Token tidak dikenal — ambil dari kontrak dengan fallback
+    const token    = new ethers.Contract(tokenAddress, ERC20_ABI, this.provider);
+    let name       = "Unknown";
+    let symbol     = "???";
+    let decimals   = 18;
+    try { name     = await token.name();             } catch {}
+    try { symbol   = await token.symbol();           } catch {}
+    try { decimals = Number(await token.decimals()); } catch {}
 
     return { name, symbol, decimals, balance, address: tokenAddress, isNative: false };
   }
@@ -72,34 +87,43 @@ export class BaseSwapper {
       return result[0];
     } catch (err) {
       throw new Error(
-        `Gagal mendapat quote.\n` +
-        `  Kemungkinan sebab:\n` +
-        `  - Pool dengan fee ${fee} tidak ada. Coba ganti POOL_FEE ke 500 atau 10000\n` +
-        `  - Alamat TOKEN_IN / TOKEN_OUT salah\n` +
+        `Gagal mendapat quote harga.\n` +
+        `  Kemungkinan penyebab:\n` +
+        `  1. Pool fee ${fee} tidak tersedia → coba POOL_FEE=500 atau POOL_FEE=10000\n` +
+        `  2. Alamat TOKEN_IN atau TOKEN_OUT salah\n` +
+        `  3. AMOUNT_IN terlalu kecil\n` +
         `  Detail: ${err.message}`
       );
     }
   }
 
   async approveToken(tokenAddress, amount) {
-    const token     = new ethers.Contract(tokenAddress, ERC20_ABI, this.wallet);
-    const allowance = await token.allowance(this.wallet.address, ADDRESSES.SWAP_ROUTER);
-    if (allowance >= amount) {
-      console.log("  ✅ Allowance sudah cukup, skip approve.");
-      return null;
+    try {
+      const token     = new ethers.Contract(tokenAddress, ERC20_ABI, this.wallet);
+      const allowance = await token.allowance(this.wallet.address, ADDRESSES.SWAP_ROUTER);
+      if (allowance >= amount) {
+        console.log("  ✅ Allowance sudah cukup, skip approve.");
+        return null;
+      }
+      console.log("  🔓 Approving token untuk router...");
+      const tx = await token.approve(ADDRESSES.SWAP_ROUTER, ethers.MaxUint256);
+      await tx.wait();
+      console.log(`  ✅ Approved: ${txLink(tx.hash)}`);
+    } catch (err) {
+      throw new Error(`Gagal approve token: ${err.message}`);
     }
-    console.log("  🔓 Approving token untuk router...");
-    const tx = await token.approve(ADDRESSES.SWAP_ROUTER, ethers.MaxUint256);
-    await tx.wait();
-    console.log(`  ✅ Approved: ${txLink(tx.hash)}`);
   }
 
   async wrapETH(amount) {
-    const weth = new ethers.Contract(ADDRESSES.TOKENS.WETH, WETH_ABI, this.wallet);
-    console.log("  📦 Wrapping ETH → WETH...");
-    const tx = await weth.deposit({ value: amount });
-    await tx.wait();
-    console.log(`  ✅ Wrapped: ${txLink(tx.hash)}`);
+    try {
+      const weth = new ethers.Contract(ADDRESSES.TOKENS.WETH, WETH_ABI, this.wallet);
+      console.log("  📦 Wrapping ETH → WETH...");
+      const tx = await weth.deposit({ value: amount });
+      await tx.wait();
+      console.log(`  ✅ Wrapped: ${txLink(tx.hash)}`);
+    } catch (err) {
+      throw new Error(`Gagal wrap ETH: ${err.message}`);
+    }
   }
 
   async swap({
@@ -110,11 +134,13 @@ export class BaseSwapper {
     const infoIn      = await this.getTokenInfo(isNativeIn ? "native" : tokenIn);
     const infoOut     = await this.getTokenInfo(tokenOut);
 
+    console.log(`\n  💰 Saldo ${infoIn.symbol}: ${formatAmount(infoIn.balance, infoIn.decimals)}`);
+
     if (infoIn.balance < amountIn) {
       throw new Error(
         `Saldo tidak cukup!\n` +
-        `  Punya  : ${formatAmount(infoIn.balance, infoIn.decimals)} ${infoIn.symbol}\n` +
-        `  Butuh  : ${formatAmount(amountIn,       infoIn.decimals)} ${infoIn.symbol}`
+        `  Punya : ${formatAmount(infoIn.balance, infoIn.decimals)} ${infoIn.symbol}\n` +
+        `  Butuh : ${formatAmount(amountIn,       infoIn.decimals)} ${infoIn.symbol}`
       );
     }
 
