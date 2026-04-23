@@ -95,20 +95,22 @@ export class BaseSwapper {
       throw new Error("Saldo tidak cukup!");
     }
 
-    let amountOut = null; 
+   let amountOut = 0n; 
     let amountOutMin = 0n;
 
     try {
-      amountOut = await this.getQuote({ tokenIn: effectiveIn, tokenOut, amountIn, fee });
-      if (amountOut !== null && amountOut !== undefined) {
+      const quoteResult = await this.getQuote({ tokenIn: effectiveIn, tokenOut, amountIn, fee });
+      if (quoteResult !== null && quoteResult !== undefined) {
+        amountOut = quoteResult;
         amountOutMin = applySlippage(amountOut, slippage);
+        
         console.log(`  📊 Estimasi output : ${formatAmount(amountOut,    infoOut.decimals)} ${infoOut.symbol}`);
         console.log(`  🛡️  Min output      : ${formatAmount(amountOutMin, infoOut.decimals)} ${infoOut.symbol}`);
       } else {
-        console.log("  ⚠️  Quote tidak tersedia. Lanjut dengan min output 0.");
+        console.log("  ⚠️  Quote tidak tersedia (RPC Busy). Menggunakan min output 0.");
       }
     } catch (err) {
-      console.log("  ⚠️  Gagal memproses quote harga.");
+      console.log("  ⚠️  Gagal memproses quote harga. Lanjut dengan min output 0.");
     }
 
     if (isNativeIn) await this.wrapETH(amountIn);
