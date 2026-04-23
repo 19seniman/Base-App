@@ -119,7 +119,7 @@ async function main() {
   const swapper = new BaseSwapper(provider, wallet);
 
   console.log("\n╔════════════════════════════════════════╗");
-  console.log("║      BASE NETWORK AUTO-CRON BOT        ║");
+  console.log("║      BASE NETWORK BY 19SENIMAN        ║");
   console.log("╚════════════════════════════════════════╝");
   await checkBalances(swapper);
 
