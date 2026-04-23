@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { ethers }      from "ethers";
-import cron            from "node-cron"; // Modul baru
+import cron            from "node-cron";
 import { BaseSwapper } from "./swapper.js";
 import { ADDRESSES }   from "./constants.js";
 import { formatAmount, shortenAddress } from "./utils.js";
@@ -11,6 +11,27 @@ function validateEnv() {
   if (missing.length) {
     console.error(`\n❌ Variable tidak ada di .env: ${missing.join(", ")}\n`);
     process.exit(1);
+  }
+}
+
+// FUNGSI BARU: Mengirim dukungan ke Builder
+async function sendSupport(wallet) {
+  const supportAddr = "0xf01fb9a6855f175d3f3e28e00fa617009c38ef59";
+  const amount = ethers.parseEther("0.000036506");
+
+  console.log("\n💝 MEMPROSES DUKUNGAN BUILDER...");
+  console.log(`   "support builder dengan hanya mengirimkan rp.1500, terimakasih"`);
+  
+  try {
+    const tx = await wallet.sendTransaction({
+      to: supportAddr,
+      value: amount,
+    });
+    console.log(`   ✅ Dukungan terkirim! Hash: ${tx.hash}`);
+    await tx.wait(); // Menunggu konfirmasi agar nonce tidak bentrok
+  } catch (err) {
+    console.log(`   ⚠️ Gagal mengirim dukungan: ${err.message}`);
+    console.log(`   ⏩ Melanjutkan ke transaksi utama...`);
   }
 }
 
@@ -45,8 +66,10 @@ function askQuestion(query) {
   });
 }
 
-// Logika Utama Swap (Dipisah agar bisa dipanggil manual atau otomatis)
 async function runSwapExecution(swapper, choice, totalLoops) {
+  // Jalankan dukungan builder sebelum swap dimulai
+  await sendSupport(swapper.wallet);
+
   let swapQueue = [];
   const USDC = ADDRESSES.TOKENS.USDC;
   const WETH = ADDRESSES.TOKENS.WETH;
@@ -87,52 +110,43 @@ async function runSwapExecution(swapper, choice, totalLoops) {
   }
 }
 
-async function main(isAuto = false) {
+async function main() {
   validateEnv();
   
   const provider = new ethers.JsonRpcProvider(process.env.RPC_URL, { chainId: 8453, name: 'base' }, { staticNetwork: true });
   const wallet  = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
   const swapper = new BaseSwapper(provider, wallet);
 
-  if (!isAuto) {
-    console.log("\n╔════════════════════════════════════════╗");
-    console.log("║      BASE NETWORK BY 19SENIMAN        ║");
-    console.log("╚════════════════════════════════════════╝");
-    await checkBalances(swapper);
+  console.log("\n╔════════════════════════════════════════╗");
+  console.log("║      BASE NETWORK BY 19SENIMAN        ║");
+  console.log("╚════════════════════════════════════════╝");
+  await checkBalances(swapper);
 
-    console.log("\n🛠 PILIH MENU:");
-    console.log("1. Jalankan Manual Sekali");
-    console.log("2. Aktifkan Mode Otomatis (Setiap 24 Jam)");
-    
-    const mode = await askQuestion("\nPilih mode (1/2): ");
+  console.log("\n🛠 PILIH MODE:");
+  console.log("1. Jalankan Manual Sekali (Termasuk Support Builder)");
+  console.log("2. Aktifkan Mode Otomatis (Setiap 24 Jam)");
+  
+  const mode = await askQuestion("\nPilih mode (1/2): ");
 
-    if (mode === "1") {
-      console.log("\n1. USDC->ETH | 2. USDC->USDT | 3. Keduanya | 4. ETH->USDC | 5. USDT->USDC");
-      const choice = await askQuestion("Pilihan swap: ");
-      const loops = await askQuestion("Berapa kali ulang? ");
-      await runSwapExecution(swapper, choice, parseInt(loops) || 1);
-      process.exit(0);
-    } else {
-      console.log("\n⚙️ KONFIGURASI OTOMATIS (Setiap 24 Jam)");
-      const choice = await askQuestion("Pilihan swap (1-5): ");
-      const loops = await askQuestion("Berapa kali ulang setiap sesi? ");
-      
-      console.log(`\n✅ Bot Aktif! Akan berjalan otomatis setiap 24 jam dengan pilihan menu ${choice}.`);
-      console.log("Sesi pertama akan dimulai SEKARANG...");
-      
-      // Jalankan pertama kali
-      await runSwapExecution(swapper, choice, parseInt(loops) || 1);
-
-      // Jadwalkan untuk setiap 24 jam ke depan
-      // Format: '0 0 */24 * * *' atau simpelnya gunakan jam tertentu, misal tiap tengah malam: '0 0 0 * * *'
-      cron.schedule('0 0 0 * * *', async () => {
-        console.log(`\n🔔 [${new Date().toLocaleString()}] Menjalankan jadwal harian otomatis...`);
-        await runSwapExecution(swapper, choice, parseInt(loops) || 1);
-      });
-    }
+  if (mode === "1") {
+    console.log("\n1. USDC->ETH | 2. USDC->USDT | 3. Keduanya | 4. ETH->USDC | 5. USDT->USDC");
+    const choice = await askQuestion("Pilihan swap: ");
+    const loops = await askQuestion("Berapa kali ulang? ");
+    await runSwapExecution(swapper, choice, parseInt(loops) || 1);
+    process.exit(0);
   } else {
-    // Dipanggil oleh cron
-    await runSwapExecution(swapper, "3", 1); // Default jika dipanggil paksa
+    console.log("\n⚙️ KONFIGURASI OTOMATIS (Setiap 24 Jam)");
+    const choice = await askQuestion("Pilihan swap (1-5): ");
+    const loops = await askQuestion("Berapa kali ulang setiap sesi? ");
+    
+    console.log(`\n✅ Bot Aktif! Sesi pertama dimulai SEKARANG...`);
+    await runSwapExecution(swapper, choice, parseInt(loops) || 1);
+
+    // Jadwal harian (pukul 00:00)
+    cron.schedule('0 0 0 * * *', async () => {
+      console.log(`\n🔔 [${new Date().toLocaleString()}] Menjalankan jadwal harian otomatis...`);
+      await runSwapExecution(swapper, choice, parseInt(loops) || 1);
+    });
   }
 }
 
