@@ -16,19 +16,22 @@ function validateEnv() {
 async function checkBalances(swapper) {
   console.log("\n📋 SALDO WALLET");
   console.log("─".repeat(42));
+  
+  // Cek ETH
   const ethBal = await swapper.provider.getBalance(swapper.wallet.address);
   console.log(`  Alamat : ${swapper.wallet.address}`);
   console.log(`  ETH    : ${formatAmount(ethBal, 18)} ETH`);
 
+  // Loop token dengan delay
   for (const [name, addr] of Object.entries(ADDRESSES.TOKENS)) {
     try {
-      // Tambahkan delay 200ms setiap cek saldo agar tidak kena rate limit
-      await new Promise(resolve => setTimeout(resolve, 200));
+      // Jeda 300 milidetik sebelum setiap request saldo
+      await new Promise(resolve => setTimeout(resolve, 300));
       
       const info = await swapper.getTokenInfo(addr);
       console.log(`  ${name.padEnd(6)}: ${formatAmount(info.balance, info.decimals)} ${info.symbol}`);
     } catch (err) {
-      console.log(`  ${name.padEnd(6)}: - (RPC Timeout)`);
+      console.log(`  ${name.padEnd(6)}: - (RPC Busy)`);
     }
   }
   console.log("─".repeat(42));
@@ -49,9 +52,10 @@ async function main() {
   console.log("║      BASE NETWORK SWAP BOT  v1.0      ║");
   console.log("╚════════════════════════════════════════╝");
 
-  const provider = new ethers.JsonRpcProvider(process.env.RPC_URL, undefined, {
-    staticNetwork: true
-});
+  const provider = new ethers.JsonRpcProvider(process.env.RPC_URL, {
+    chainId: 8453,
+    name: 'base'
+}, { staticNetwork: true });
   const wallet   = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
   const swapper  = new BaseSwapper(provider, wallet);
 
