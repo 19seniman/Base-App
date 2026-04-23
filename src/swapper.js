@@ -134,19 +134,24 @@ export class BaseSwapper {
       );
     }
 
-    // Quote harga
+    // --- PERBAIKAN DEKLARASI DI SINI ---
+    let amountOut = null; 
     let amountOutMin = 0n;
-    if (amountOut !== null && amountOut !== undefined) {
-      amountOutMin = applySlippage(amountOut, slippage);
-      console.log(`  📊 Estimasi output : ${formatAmount(amountOut,    infoOut.decimals)} ${infoOut.symbol}`);
-      console.log(`  🛡️  Min output      : ${formatAmount(amountOutMin, infoOut.decimals)} ${infoOut.symbol}`);
-    } else {
-      console.log("  ⚠️  Gagal mendapatkan quote. Menggunakan amountOutMinimum = 0.");
-    }
 
-    if (amountOut) {
-      console.log(`  📊 Estimasi output : ${formatAmount(amountOut,    infoOut.decimals)} ${infoOut.symbol}`);
-      console.log(`  🛡️  Min output      : ${formatAmount(amountOutMin, infoOut.decimals)} ${infoOut.symbol}`);
+    // Quote harga
+    try {
+      amountOut = await this.getQuote({ tokenIn: effectiveIn, tokenOut, amountIn, fee });
+      
+      if (amountOut !== null && amountOut !== undefined) {
+        amountOutMin = applySlippage(amountOut, slippage);
+        console.log(`  📊 Estimasi output : ${formatAmount(amountOut,    infoOut.decimals)} ${infoOut.symbol}`);
+        console.log(`  🛡️  Min output      : ${formatAmount(amountOutMin, infoOut.decimals)} ${infoOut.symbol}`);
+      } else {
+        console.log("  ⚠️  Gagal mendapatkan quote. Menggunakan amountOutMinimum = 0.");
+      }
+    } catch (quoteError) {
+      console.log(`  ⚠️  Error saat quoting: ${quoteError.message}`);
+      amountOutMin = 0n;
     }
 
     // Wrap & Approve
@@ -170,9 +175,9 @@ export class BaseSwapper {
       const est = await this.router.exactInputSingle.estimateGas(swapParams);
       gasLimit  = (est * 120n) / 100n;
       console.log(`\n  ⛽ Gas estimasi: ${est} units`);
-    } catch {
-      gasLimit = 300000n;
-      console.log("  ⚠️  Pakai gas default: 300000");
+    } catch (gasError) {
+      gasLimit = 400000n; // Menaikkan dikit ke 400k agar lebih aman
+      console.log("  ⚠️  Gagal estimasi gas, pakai default: 400000");
     }
 
     // Kirim transaksi
@@ -184,4 +189,3 @@ export class BaseSwapper {
 
     return { tx, receipt, amountOut, amountOutMin, infoIn, infoOut };
   }
-}
