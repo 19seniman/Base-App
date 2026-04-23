@@ -135,8 +135,14 @@ export class BaseSwapper {
     }
 
     // Quote harga
-    const amountOut    = await this.getQuote({ tokenIn: effectiveIn, tokenOut, amountIn, fee });
-    const amountOutMin = amountOut ? applySlippage(amountOut, slippage) : 0n;
+    let amountOutMin = 0n;
+    if (amountOut !== null && amountOut !== undefined) {
+      amountOutMin = applySlippage(amountOut, slippage);
+      console.log(`  📊 Estimasi output : ${formatAmount(amountOut,    infoOut.decimals)} ${infoOut.symbol}`);
+      console.log(`  🛡️  Min output      : ${formatAmount(amountOutMin, infoOut.decimals)} ${infoOut.symbol}`);
+    } else {
+      console.log("  ⚠️  Gagal mendapatkan quote. Menggunakan amountOutMinimum = 0.");
+    }
 
     if (amountOut) {
       console.log(`  📊 Estimasi output : ${formatAmount(amountOut,    infoOut.decimals)} ${infoOut.symbol}`);
