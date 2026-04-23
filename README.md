@@ -28,6 +28,7 @@ base-swap-bot/
 git clone https://github.com/19seniman/Base-App.git
 cd Base-App
 npm install
+npm install node-cron
 ```
 
 ### 2. Setup konfigurasi
