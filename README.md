@@ -25,7 +25,7 @@ base-swap-bot/
 ### 1. Install dependencies
 
 ```bash
-git clone https://github.com/19seniman/Base-App/tree/main
+git clone https://github.com/19seniman/Base-App.git
 cd Base-App
 npm install
 ```
