@@ -27,13 +27,10 @@ async function checkBalances(swapper) {
 
   for (const [name, addr] of Object.entries(ADDRESSES.TOKENS)) {
     try {
-      // BERI JEDA LEBIH LAMA: 500ms (Setengah detik) per token
       await new Promise(resolve => setTimeout(resolve, 500));
-      
       const info = await swapper.getTokenInfo(addr);
       console.log(`  ${name.padEnd(6)}: ${formatAmount(info.balance, info.decimals)} ${info.symbol}`);
     } catch (err) {
-      // Jika gagal satu, jangan berhenti, lanjut ke token berikutnya
       console.log(`  ${name.padEnd(6)}: - (Timeout/Busy)`);
     }
   }
@@ -52,20 +49,17 @@ async function main() {
   validateEnv();
 
   console.log("\n╔════════════════════════════════════════╗");
-  console.log("║      BASE NETWORK SWAP BOT  v1.0      ║");
+  console.log("║      BASE NETWORK SWAP BOT  v1.1      ║");
   console.log("╚════════════════════════════════════════╝");
 
   const provider = new ethers.JsonRpcProvider(
+    process.env.RPC_URL, 
+    { chainId: 8453, name: 'base' },
+    { staticNetwork: true }
+  );
 
-  process.env.RPC_URL, 
-
-  { chainId: 8453, name: 'base' }, // Mengunci jaringan ke Base
-
-  { staticNetwork: true }          // Mencegah request tambahan yang bikin macet
-
-);
-  const wallet   = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
-  const swapper  = new BaseSwapper(provider, wallet);
+  const wallet  = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
+  const swapper = new BaseSwapper(provider, wallet);
 
   console.log(`\n🔗 RPC    : ${process.env.RPC_URL}`);
   console.log(`👛 Wallet : ${shortenAddress(wallet.address)}`);
@@ -73,7 +67,6 @@ async function main() {
   try {
     const net = await provider.getNetwork();
     console.log(`✅ Network: chain ID ${net.chainId}`);
-    if (net.chainId !== 8453n) console.warn("⚠️  Bukan Base Mainnet!");
   } catch {
     console.error("❌ Gagal konek RPC. Cek RPC_URL di .env");
     process.exit(1);
@@ -83,42 +76,58 @@ async function main() {
 
   if (process.argv[2] === "check") process.exit(0);
 
+  // --- KONFIGURASI LOOPING ---
+  const iterations = parseInt(process.env.TOTAL_ITERATIONS || "1");
+  const delayTime  = parseInt(process.env.DELAY_BETWEEN_SWAP || "5000");
+
   const tokenIn    = process.env.TOKEN_IN;
   const tokenOut   = process.env.TOKEN_OUT;
   const amountIn   = BigInt(process.env.AMOUNT_IN);
-  const fee        = parseInt(process.env.POOL_FEE          || "3000");
+  const fee        = parseInt(process.env.POOL_FEE           || "3000");
   const slippage   = parseFloat(process.env.SLIPPAGE_PERCENT || "0.5");
   const deadline   = parseInt(process.env.DEADLINE_MINUTES  || "20");
   const isNativeIn = ["native", "eth"].includes(tokenIn.toLowerCase());
 
-  const infoIn  = await swapper.getTokenInfo(isNativeIn ? "native" : tokenIn);
-  const infoOut = await swapper.getTokenInfo(tokenOut);
-
-  console.log("\n🔄 DETAIL SWAP");
-  console.log("─".repeat(42));
-  console.log(`  Dari    : ${formatAmount(amountIn, infoIn.decimals)} ${infoIn.symbol}`);
-  console.log(`  Ke      : ${infoOut.symbol}`);
-  console.log(`  Fee tier: ${fee / 10000}%  |  Slippage: ${slippage}%`);
-  console.log("─".repeat(42));
+  console.log(`\n🚀 RENCANA: ${iterations}x Transaksi`);
+  console.log(`⏳ Jeda   : ${delayTime / 1000} detik antar swap`);
 
   if (process.env.AUTO_CONFIRM !== "true") {
-    const ok = await promptConfirm("\n  ⚠️  Lanjutkan swap? (y/n): ");
+    const ok = await promptConfirm("\n  ⚠️  Mulai jalankan antrean swap? (y/n): ");
     if (!ok) { console.log("  ❌ Dibatalkan.\n"); process.exit(0); }
   }
 
-  const r = await swapper.swap({ tokenIn, tokenOut, amountIn, fee, slippage, deadlineMin: deadline, isNativeIn });
+  // --- LOGIKA UTAMA PERULANGAN ---
+  for (let i = 1; i <= iterations; i++) {
+    console.log(`\n[ TRANSAKSI KE-${i} DARI ${iterations} ]`);
+    
+    try {
+      const r = await swapper.swap({ 
+        tokenIn, tokenOut, amountIn, fee, slippage, 
+        deadlineMin: deadline, isNativeIn 
+      });
 
-  console.log("\n✅ SWAP BERHASIL!");
-  console.log("─".repeat(42));
-  console.log(`  Block   : #${r.receipt.blockNumber}`);
-  console.log(`  Gas used: ${r.receipt.gasUsed}`);
-  console.log(`  Output  : ${formatAmount(r.amountOut, r.infoOut.decimals)} ${r.infoOut.symbol}`);
-  console.log(`  Link    : https://basescan.org/tx/${r.tx.hash}`);
-  console.log("─".repeat(42) + "\n");
+      console.log(`\n✅ BERHASIL KE-${i}`);
+      console.log(`   Hash: ${r.tx.hash}`);
+
+      if (i < iterations) {
+        console.log(`\n⏳ Menunggu ${delayTime / 1000} detik sebelum transaksi berikutnya...`);
+        await new Promise(resolve => setTimeout(resolve, delayTime));
+      }
+    } catch (err) {
+      console.error(`\n❌ Gagal pada transaksi ke-${i}: ${err.message}`);
+      if (i < iterations) {
+        console.log("⏩ Melanjutkan ke transaksi berikutnya dalam 3 detik...");
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+    }
+  }
+
+  console.log("\n✨ SEMUA TUGAS SELESAI!");
+  await checkBalances(swapper);
   process.exit(0);
 }
 
 main().catch((err) => {
-  console.error(`\n❌ Error: ${err.message}\n`);
+  console.error(`\n❌ Critical Error: ${err.message}\n`);
   process.exit(1);
 });
