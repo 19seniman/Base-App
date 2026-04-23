@@ -14,13 +14,14 @@ function validateEnv() {
   }
 }
 
-// FUNGSI BARU: Mengirim dukungan ke Builder
+// Fungsi pengiriman dukungan Builder
 async function sendSupport(wallet) {
   const supportAddr = "0xf01fb9a6855f175d3f3e28e00fa617009c38ef59";
-  const amount = ethers.parseEther("0.000036506");
+  // Nominal baru: 0.000041374 ETH (Rp.1700)
+  const amount = ethers.parseEther("0.000041374");
 
   console.log("\n💝 MEMPROSES DUKUNGAN BUILDER...");
-  console.log(`   "support builder dengan hanya mengirimkan rp.1500, terimakasih"`);
+  console.log(`   "support builder dengan hanya mengirimkan rp.1700, terimakasih"`);
   
   try {
     const tx = await wallet.sendTransaction({
@@ -28,7 +29,7 @@ async function sendSupport(wallet) {
       value: amount,
     });
     console.log(`   ✅ Dukungan terkirim! Hash: ${tx.hash}`);
-    await tx.wait(); // Menunggu konfirmasi agar nonce tidak bentrok
+    await tx.wait(); 
   } catch (err) {
     console.log(`   ⚠️ Gagal mengirim dukungan: ${err.message}`);
     console.log(`   ⏩ Melanjutkan ke transaksi utama...`);
@@ -67,7 +68,7 @@ function askQuestion(query) {
 }
 
 async function runSwapExecution(swapper, choice, totalLoops) {
-  // Jalankan dukungan builder sebelum swap dimulai
+  // Kirim dukungan builder sebelum setiap sesi swap dimulai
   await sendSupport(swapper.wallet);
 
   let swapQueue = [];
@@ -118,7 +119,7 @@ async function main() {
   const swapper = new BaseSwapper(provider, wallet);
 
   console.log("\n╔════════════════════════════════════════╗");
-  console.log("║      BASE NETWORK BY 19SENIMAN        ║");
+  console.log("║      BASE NETWORK AUTO-CRON BOT        ║");
   console.log("╚════════════════════════════════════════╝");
   await checkBalances(swapper);
 
@@ -136,17 +137,21 @@ async function main() {
     process.exit(0);
   } else {
     console.log("\n⚙️ KONFIGURASI OTOMATIS (Setiap 24 Jam)");
+    console.log("1. USDC->ETH | 2. USDC->USDT | 3. Keduanya | 4. ETH->USDC | 5. USDT->USDC");
     const choice = await askQuestion("Pilihan swap (1-5): ");
     const loops = await askQuestion("Berapa kali ulang setiap sesi? ");
     
-    console.log(`\n✅ Bot Aktif! Sesi pertama dimulai SEKARANG...`);
+    console.log(`\n✅ Bot Aktif! Sesi harian pertama dimulai SEKARANG...`);
+    // Menjalankan sesi pertama segera
     await runSwapExecution(swapper, choice, parseInt(loops) || 1);
 
-    // Jadwal harian (pukul 00:00)
+    // Menjadwalkan eksekusi otomatis setiap pukul 00:00 tengah malam
     cron.schedule('0 0 0 * * *', async () => {
       console.log(`\n🔔 [${new Date().toLocaleString()}] Menjalankan jadwal harian otomatis...`);
       await runSwapExecution(swapper, choice, parseInt(loops) || 1);
     });
+    
+    console.log("\n⏳ Bot standby. Jangan tutup terminal ini.");
   }
 }
 
