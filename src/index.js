@@ -17,21 +17,24 @@ async function checkBalances(swapper) {
   console.log("\n📋 SALDO WALLET");
   console.log("─".repeat(42));
   
-  // Cek ETH
-  const ethBal = await swapper.provider.getBalance(swapper.wallet.address);
-  console.log(`  Alamat : ${swapper.wallet.address}`);
-  console.log(`  ETH    : ${formatAmount(ethBal, 18)} ETH`);
+  try {
+    const ethBal = await swapper.provider.getBalance(swapper.wallet.address);
+    console.log(`  Alamat : ${swapper.wallet.address}`);
+    console.log(`  ETH    : ${formatAmount(ethBal, 18)} ETH`);
+  } catch (e) {
+    console.log("  ⚠️ Gagal mengambil saldo ETH (RPC Down)");
+  }
 
-  // Loop token dengan delay
   for (const [name, addr] of Object.entries(ADDRESSES.TOKENS)) {
     try {
-      // Jeda 300 milidetik sebelum setiap request saldo
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // BERI JEDA LEBIH LAMA: 500ms (Setengah detik) per token
+      await new Promise(resolve => setTimeout(resolve, 500));
       
       const info = await swapper.getTokenInfo(addr);
       console.log(`  ${name.padEnd(6)}: ${formatAmount(info.balance, info.decimals)} ${info.symbol}`);
     } catch (err) {
-      console.log(`  ${name.padEnd(6)}: - (RPC Busy)`);
+      // Jika gagal satu, jangan berhenti, lanjut ke token berikutnya
+      console.log(`  ${name.padEnd(6)}: - (Timeout/Busy)`);
     }
   }
   console.log("─".repeat(42));
@@ -52,10 +55,15 @@ async function main() {
   console.log("║      BASE NETWORK SWAP BOT  v1.0      ║");
   console.log("╚════════════════════════════════════════╝");
 
-  const provider = new ethers.JsonRpcProvider(process.env.RPC_URL, {
-    chainId: 8453,
-    name: 'base'
-}, { staticNetwork: true });
+  const provider = new ethers.JsonRpcProvider(
+
+  process.env.RPC_URL, 
+
+  { chainId: 8453, name: 'base' }, // Mengunci jaringan ke Base
+
+  { staticNetwork: true }          // Mencegah request tambahan yang bikin macet
+
+);
   const wallet   = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
   const swapper  = new BaseSwapper(provider, wallet);
 
