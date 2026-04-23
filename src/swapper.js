@@ -42,16 +42,15 @@ export class BaseSwapper {
   }
 
   async getQuote({ tokenIn, tokenOut, amountIn, fee }) {
-    // Coba Quoter V1
     try {
       console.log("  🔍 Mencoba Quoter V1...");
+      // Menambahkan sqrtPriceLimitX96: 0 sebagai argumen terakhir
       const amountOut = await this.quoterV1.quoteExactInputSingle.staticCall(
         tokenIn, tokenOut, fee, amountIn, 0
       );
       return amountOut;
     } catch (e1) {
       console.log(`  ⚠️  Quoter V1 gagal: ${e1.reason || "ERROR"}`);
-      // Coba Quoter V2
       try {
         console.log("  🔍 Mencoba Quoter V2...");
         const params = { tokenIn, tokenOut, amountIn, fee, sqrtPriceLimitX96: 0 };
@@ -82,7 +81,7 @@ export class BaseSwapper {
     await tx.wait();
   }
 
- async swap({
+  async swap({
     tokenIn, tokenOut, amountIn,
     fee = 3000, slippage = 0.5, deadlineMin = 20, isNativeIn = false,
   }) {
@@ -96,23 +95,20 @@ export class BaseSwapper {
       throw new Error("Saldo tidak cukup!");
     }
 
-    // Inisialisasi dengan nilai aman agar tidak BigNumberish Error
     let amountOut = null; 
-    let amountOutMin = 0n; // Default ke BigInt 0
+    let amountOutMin = 0n;
 
     try {
       amountOut = await this.getQuote({ tokenIn: effectiveIn, tokenOut, amountIn, fee });
-      
-      // Validasi: Hanya hitung slippage jika amountOut adalah angka valid
       if (amountOut !== null && amountOut !== undefined) {
         amountOutMin = applySlippage(amountOut, slippage);
         console.log(`  📊 Estimasi output : ${formatAmount(amountOut,    infoOut.decimals)} ${infoOut.symbol}`);
         console.log(`  🛡️  Min output      : ${formatAmount(amountOutMin, infoOut.decimals)} ${infoOut.symbol}`);
       } else {
-        console.log("  ⚠️  Quote gagal (RPC Busy). Menggunakan min output 0.");
+        console.log("  ⚠️  Quote tidak tersedia. Lanjut dengan min output 0.");
       }
     } catch (err) {
-      console.log("  ⚠️  Gagal mendapatkan quote. Lanjut dengan min output 0.");
+      console.log("  ⚠️  Gagal memproses quote harga.");
     }
 
     if (isNativeIn) await this.wrapETH(amountIn);
@@ -124,14 +120,14 @@ export class BaseSwapper {
       fee,
       recipient:         this.wallet.address,
       amountIn,
-      amountOutMinimum:  amountOutMin, // Sekarang dijamin minimal 0n, bukan null
+      amountOutMinimum:  amountOutMin,
       sqrtPriceLimitX96: 0n,
     };
 
     let gasLimit;
     try {
       const est = await this.router.exactInputSingle.estimateGas(swapParams);
-      gasLimit  = (est * 130n) / 100n;
+      gasLimit  = (est * 135n) / 100n; // Menambah buffer gas 35%
     } catch {
       gasLimit = 400000n;
       console.log("  ⚠️  Gagal estimasi gas, pakai default: 400000");
@@ -144,3 +140,4 @@ export class BaseSwapper {
 
     return { tx, receipt, amountOut, amountOutMin, infoIn, infoOut };
   }
+} // TANDA KURUNG TUTUP INI SANGAT PENTING
