@@ -1,18 +1,16 @@
+cat > package.json << 'EOF'
 {
   "name": "base-swap-bot",
   "version": "1.0.0",
-  "description": "Bot untuk swap/trade token di Base Network menggunakan Uniswap V3",
-  "main": "src/index.js",
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
-    "swap": "node src/index.js swap",
+    "swap":  "node src/index.js swap",
     "check": "node src/index.js check"
   },
   "dependencies": {
     "ethers": "^6.13.0",
-    "dotenv": "^16.4.5",
-    "chalk": "^5.3.0",
-    "ora": "^8.0.1"
+    "dotenv": "^16.4.5"
   }
 }
+EOF
