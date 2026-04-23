@@ -21,171 +21,88 @@ export class BaseSwapper {
     this.quoterV2  = new ethers.Contract(ADDRESSES.QUOTER_V2,   QUOTER_V2_ABI,   provider);
   }
 
-  // ── Ambil saldo token via provider.call (lebih andal) ────
-  async getBalance(tokenAddress) {
-    try {
-      const iface  = new ethers.Interface(["function balanceOf(address) view returns (uint256)"]);
-      const data   = iface.encodeFunctionData("balanceOf", [this.wallet.address]);
-      const result = await this.provider.call({ to: tokenAddress, data });
-      return iface.decodeFunctionResult("balanceOf", result)[0];
-    } catch {
-      return 0n;
-    }
-  }
-
-  // ── Info token ───────────────────────────────────────────
   async getTokenInfo(tokenAddress) {
-    if (tokenAddress.toLowerCase() === "native") {
-      const balance = await this.provider.getBalance(this.wallet.address);
-      return { name: "Ethereum", symbol: "ETH", decimals: 18, balance, isNative: true };
+    if (tokenAddress.toLowerCase() === "native" || tokenAddress === ADDRESSES.TOKENS.WETH) {
+      const bal = await this.provider.getBalance(this.wallet.address);
+      return { ...TOKEN_OVERRIDES[ADDRESSES.TOKENS.WETH.toLowerCase()], balance: bal };
     }
-
-    const key      = tokenAddress.toLowerCase();
-    const override = TOKEN_OVERRIDES[key];
-    const balance  = await this.getBalance(tokenAddress);
-
-    if (override) {
-      return { ...override, balance, address: tokenAddress, isNative: false };
-    }
-
-    // Token tidak dikenal
-    const token  = new ethers.Contract(tokenAddress, ERC20_ABI, this.provider);
-    let name     = "Unknown";
-    let symbol   = "???";
-    let decimals = 18;
-    try { name     = await token.name();             } catch {}
-    try { symbol   = await token.symbol();           } catch {}
-    try { decimals = Number(await token.decimals()); } catch {}
-
-    return { name, symbol, decimals, balance, address: tokenAddress, isNative: false };
+    const contract = new ethers.Contract(tokenAddress, ERC20_ABI, this.provider);
+    const [name, symbol, decimals, balance] = await Promise.all([
+      contract.name(), contract.symbol(), contract.decimals(), contract.balanceOf(this.wallet.address)
+    ]);
+    return { name, symbol, decimals: Number(decimals), balance };
   }
 
-  // ── Quote: coba V1 dulu, fallback ke V2, lalu skip ──────
   async getQuote({ tokenIn, tokenOut, amountIn, fee }) {
-    // Coba Quoter V1 (parameter flat, lebih kompatibel)
+    // Coba Quoter V1
     try {
       console.log("  🔍 Mencoba Quoter V1...");
-      const out = await this.quoterV1.quoteExactInputSingle.staticCall(
-        tokenIn, tokenOut, fee, amountIn, 0n
-      );
-      console.log("  ✅ Quote V1 berhasil.");
-      return out;
+      return await this.quoterV1.quoteExactInputSingle(tokenIn, tokenOut, fee, amountIn, 0);
     } catch (e1) {
-      console.log(`  ⚠️  Quoter V1 gagal: ${e1.code ?? e1.message}`);
+      console.log(`  ⚠️  Quoter V1 gagal: ${e1.reason || "ERROR"}`);
+      // Coba Quoter V2
+      try {
+        console.log("  🔍 Mencoba Quoter V2...");
+        const res = await this.quoterV2.quoteExactInputSingle.staticCall({
+          tokenIn, tokenOut, amountIn, fee, sqrtPriceLimitX96: 0
+        });
+        return res.amountOut;
+      } catch (e2) {
+        console.log(`  ⚠️  Quoter V2 gagal: ${e2.reason || "ERROR"}`);
+        return null;
+      }
     }
-
-    // Coba Quoter V2 (parameter struct)
-    try {
-      console.log("  🔍 Mencoba Quoter V2...");
-      const result = await this.quoterV2.quoteExactInputSingle.staticCall({
-        tokenIn, tokenOut, amountIn, fee, sqrtPriceLimitX96: 0n,
-      });
-      console.log("  ✅ Quote V2 berhasil.");
-      return result[0];
-    } catch (e2) {
-      console.log(`  ⚠️  Quoter V2 gagal: ${e2.code ?? e2.message}`);
-    }
-
-    // Kedua quoter gagal — lanjut tanpa estimasi (amountOutMinimum = 0)
-    console.log("  ⚠️  Quote tidak tersedia. Swap tetap dilanjutkan dengan amountOutMinimum = 0.");
-    console.log("  ⚠️  PERHATIAN: Tanpa minimum output, slippage tidak terlindungi!");
-    return null;
   }
 
-  // ── Approve ──────────────────────────────────────────────
   async approveToken(tokenAddress, amount) {
-    const token     = new ethers.Contract(tokenAddress, ERC20_ABI, this.wallet);
-    const allowance = await token.allowance(this.wallet.address, ADDRESSES.SWAP_ROUTER);
-    if (allowance >= amount) {
-      console.log("  ✅ Allowance sudah cukup, skip approve.");
-      return;
+    const contract = new ethers.Contract(tokenAddress, ERC20_ABI, this.wallet);
+    const allowance = await contract.allowance(this.wallet.address, ADDRESSES.SWAP_ROUTER);
+    if (allowance < amount) {
+      console.log(`  🔓 Approving token...`);
+      const tx = await contract.approve(ADDRESSES.SWAP_ROUTER, amount);
+      await tx.wait();
     }
-    console.log("  🔓 Approving token...");
-    const tx = await token.approve(ADDRESSES.SWAP_ROUTER, ethers.MaxUint256);
-    await tx.wait();
-    console.log(`  ✅ Approved: ${txLink(tx.hash)}`);
   }
 
-  // ── Wrap ETH ─────────────────────────────────────────────
   async wrapETH(amount) {
     const weth = new ethers.Contract(ADDRESSES.TOKENS.WETH, WETH_ABI, this.wallet);
-    console.log("  📦 Wrapping ETH → WETH...");
+    console.log(`  📦 Wrapping ETH ke WETH...`);
     const tx = await weth.deposit({ value: amount });
     await tx.wait();
-    console.log(`  ✅ Wrapped: ${txLink(tx.hash)}`);
   }
 
-  // ── Swap utama ───────────────────────────────────────────
-  async swap({
-    tokenIn, tokenOut, amountIn,
-    fee = 3000, slippage = 0.5, deadlineMin = 20, isNativeIn = false,
-  }) {
+  async swap({ tokenIn, tokenOut, amountIn, fee = 3000, slippage = 0.5, isNativeIn = false }) {
     const effectiveIn = isNativeIn ? ADDRESSES.TOKENS.WETH : tokenIn;
-    const infoIn      = await this.getTokenInfo(isNativeIn ? "native" : tokenIn);
-    const infoOut     = await this.getTokenInfo(tokenOut);
-
-    console.log(`\n  💰 Saldo ${infoIn.symbol}: ${formatAmount(infoIn.balance, infoIn.decimals)}`);
-
-    if (infoIn.balance < amountIn) {
-      throw new Error(
-        `Saldo tidak cukup!\n` +
-        `  Punya : ${formatAmount(infoIn.balance, infoIn.decimals)} ${infoIn.symbol}\n` +
-        `  Butuh : ${formatAmount(amountIn,       infoIn.decimals)} ${infoIn.symbol}`
-      );
-    }
-
-    // --- PERBAIKAN DEKLARASI DI SINI ---
-    let amountOut = null; 
+    const infoOut = await this.getTokenInfo(tokenOut);
+    
+    let amountOut = null;
     let amountOutMin = 0n;
 
-    // Quote harga
     try {
       amountOut = await this.getQuote({ tokenIn: effectiveIn, tokenOut, amountIn, fee });
-      
-      if (amountOut !== null && amountOut !== undefined) {
+      if (amountOut) {
         amountOutMin = applySlippage(amountOut, slippage);
-        console.log(`  📊 Estimasi output : ${formatAmount(amountOut,    infoOut.decimals)} ${infoOut.symbol}`);
-        console.log(`  🛡️  Min output      : ${formatAmount(amountOutMin, infoOut.decimals)} ${infoOut.symbol}`);
-      } else {
-        console.log("  ⚠️  Gagal mendapatkan quote. Menggunakan amountOutMinimum = 0.");
+        console.log(`  📊 Estimasi: ${formatAmount(amountOut, infoOut.decimals)} | Min: ${formatAmount(amountOutMin, infoOut.decimals)}`);
       }
-    } catch (quoteError) {
-      console.log(`  ⚠️  Error saat quoting: ${quoteError.message}`);
-      amountOutMin = 0n;
+    } catch (e) {
+      console.log("  ⚠️  Quote gagal, lanjut tanpa slippage protection.");
     }
 
-    // Wrap & Approve
     if (isNativeIn) await this.wrapETH(amountIn);
     await this.approveToken(effectiveIn, amountIn);
 
-    // Parameter swap
-    const swapParams = {
-      tokenIn:           effectiveIn,
+    const params = {
+      tokenIn: effectiveIn,
       tokenOut,
       fee,
-      recipient:         this.wallet.address,
+      recipient: this.wallet.address,
       amountIn,
-      amountOutMinimum:  amountOutMin,
-      sqrtPriceLimitX96: 0n,
+      amountOutMinimum: amountOutMin,
+      sqrtPriceLimitX96: 0,
     };
 
-    // Estimasi gas
-    let gasLimit;
-    try {
-      const est = await this.router.exactInputSingle.estimateGas(swapParams);
-      gasLimit  = (est * 120n) / 100n;
-      console.log(`\n  ⛽ Gas estimasi: ${est} units`);
-    } catch (gasError) {
-      gasLimit = 400000n; // Menaikkan dikit ke 400k agar lebih aman
-      console.log("  ⚠️  Gagal estimasi gas, pakai default: 400000");
-    }
-
-    // Kirim transaksi
-    console.log("\n  🚀 Mengirim transaksi swap...");
-    const tx      = await this.router.exactInputSingle(swapParams, { gasLimit });
-    console.log(`  📤 Tx hash : ${txLink(tx.hash)}`);
-    console.log("  ⏳ Menunggu konfirmasi blok...");
+    const tx = await this.router.exactInputSingle(params, { gasLimit: 400000 });
     const receipt = await tx.wait();
-
-    return { tx, receipt, amountOut, amountOutMin, infoIn, infoOut };
+    return { tx, receipt };
   }
+}
