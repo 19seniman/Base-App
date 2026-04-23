@@ -1,4 +1,3 @@
-cat > package.json << 'EOF'
 {
   "name": "base-swap-bot",
   "version": "1.0.0",
@@ -13,4 +12,4 @@ cat > package.json << 'EOF'
     "dotenv": "^16.4.5"
   }
 }
-EOF
+
