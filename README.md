@@ -37,14 +37,26 @@ cp .env.example .env
 Lalu edit file `.env`:
 
 ```env
-PRIVATE_KEY=your_private_key_tanpa_0x
+# --- Kredibilitas & Koneksi ---
+PRIVATE_KEY=isi_dengan_private_key_tanpa0x
 RPC_URL=https://1rpc.io/base
-TOKEN_IN=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
-TOKEN_OUT=0x4200000000000000000000000000000000000006
-AMOUNT_IN=10000    
+
+# --- Pengaturan Jumlah Swap ---
+# PENTING: Gunakan format angka mentah (tanpa titik/koma)
+# Jika menu 1,2,3 (USDC): 11670 = 0.01167 USDC (6 desimal)
+# Jika menu 4 (ETH): 7301300000000 = 0.00000730131 ETH (18 desimal)
+# Jika menu 5 (USDT): 10000 = 0.01 USDT (6 desimal)
+AMOUNT_IN=11670
+
+# --- Pengaturan Transaksi ---
+# Pool Fee: 500 = 0.05% (Sangat disarankan untuk Base)
 POOL_FEE=500
-TOTAL_ITERATIONS=5
-DELAY_BETWEEN_SWAP=10000
+SLIPPAGE_PERCENT=0.5
+DEADLINE_MINUTES=20
+
+# --- Fitur Otomatisasi ---
+# Jeda antar transaksi (15 detik)
+DELAY_BETWEEN_SWAP=15000
 AUTO_CONFIRM=false
 ```
 
