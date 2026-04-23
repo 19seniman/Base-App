@@ -82,7 +82,7 @@ export class BaseSwapper {
     await tx.wait();
   }
 
-  async swap({
+ async swap({
     tokenIn, tokenOut, amountIn,
     fee = 3000, slippage = 0.5, deadlineMin = 20, isNativeIn = false,
   }) {
@@ -96,20 +96,23 @@ export class BaseSwapper {
       throw new Error("Saldo tidak cukup!");
     }
 
+    // Inisialisasi dengan nilai aman agar tidak BigNumberish Error
     let amountOut = null; 
-    let amountOutMin = 0n;
+    let amountOutMin = 0n; // Default ke BigInt 0
 
     try {
       amountOut = await this.getQuote({ tokenIn: effectiveIn, tokenOut, amountIn, fee });
-      if (amountOut) {
+      
+      // Validasi: Hanya hitung slippage jika amountOut adalah angka valid
+      if (amountOut !== null && amountOut !== undefined) {
         amountOutMin = applySlippage(amountOut, slippage);
         console.log(`  📊 Estimasi output : ${formatAmount(amountOut,    infoOut.decimals)} ${infoOut.symbol}`);
         console.log(`  🛡️  Min output      : ${formatAmount(amountOutMin, infoOut.decimals)} ${infoOut.symbol}`);
       } else {
-        console.log("  ⚠️  Quote tidak tersedia. Swap dilanjutkan dengan min output 0.");
+        console.log("  ⚠️  Quote gagal (RPC Busy). Menggunakan min output 0.");
       }
     } catch (err) {
-      console.log("  ⚠️  Gagal mendapatkan quote.");
+      console.log("  ⚠️  Gagal mendapatkan quote. Lanjut dengan min output 0.");
     }
 
     if (isNativeIn) await this.wrapETH(amountIn);
@@ -121,16 +124,17 @@ export class BaseSwapper {
       fee,
       recipient:         this.wallet.address,
       amountIn,
-      amountOutMinimum:  amountOutMin,
+      amountOutMinimum:  amountOutMin, // Sekarang dijamin minimal 0n, bukan null
       sqrtPriceLimitX96: 0n,
     };
 
     let gasLimit;
     try {
       const est = await this.router.exactInputSingle.estimateGas(swapParams);
-      gasLimit = (est * 110n) / 100n;
+      gasLimit  = (est * 130n) / 100n;
     } catch {
       gasLimit = 400000n;
+      console.log("  ⚠️  Gagal estimasi gas, pakai default: 400000");
     }
 
     console.log("\n  🚀 Mengirim transaksi swap...");
@@ -140,4 +144,3 @@ export class BaseSwapper {
 
     return { tx, receipt, amountOut, amountOutMin, infoIn, infoOut };
   }
-} // TANDA KURUNG INI HARUS ADA UNTUK MENUTUP CLASS
