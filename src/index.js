@@ -45,9 +45,7 @@ async function main() {
   console.log("║      BASE NETWORK SWAP BOT  v1.0      ║");
   console.log("╚════════════════════════════════════════╝");
 
-  const provider = new ethers.JsonRpcProvider(process.env.RPC_URL, undefined, {
-    staticNetwork: true // Mengurangi request "eth_chainId" yang tidak perlu
-});
+  const provider = new ethers.JsonRpcProvider(process.env.RPC_URL, undefined, {staticNetwork: true });
   const wallet   = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
   const swapper  = new BaseSwapper(provider, wallet);
 
