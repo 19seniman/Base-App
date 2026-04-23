@@ -5,7 +5,7 @@ import { ADDRESSES }   from "./constants.js";
 import { formatAmount, shortenAddress } from "./utils.js";
 
 function validateEnv() {
-  const required = ["PRIVATE_KEY", "RPC_URL", "TOKEN_IN", "AMOUNT_IN"];
+  const required = ["PRIVATE_KEY", "RPC_URL", "AMOUNT_IN"];
   const missing  = required.filter((k) => !process.env[k]);
   if (missing.length) {
     console.error(`\n❌ Variable tidak ada di .env: ${missing.join(", ")}\n`);
@@ -48,7 +48,7 @@ async function main() {
   validateEnv();
 
   console.log("\n╔════════════════════════════════════════╗");
-  console.log("║      BASE NETWORK INTERACTIVE BOT      ║");
+  console.log("║      BASE NETWORK ADVANCED BOT v1.2    ║");
   console.log("╚════════════════════════════════════════╝");
 
   const provider = new ethers.JsonRpcProvider(process.env.RPC_URL, { chainId: 8453, name: 'base' }, { staticNetwork: true });
@@ -63,33 +63,48 @@ async function main() {
   console.log("\n🛠 PILIH TARGET SWAP:");
   console.log("1. USDC -> ETH");
   console.log("2. USDC -> USDT");
-  console.log("3. Keduanya (ETH & USDT)");
+  console.log("3. Keduanya (USDC -> ETH & USDT)");
+  console.log("4. ETH -> USDC");
+  console.log("5. USDT -> USDC");
   
-  const choice = await askQuestion("\nMasukkan pilihan (1/2/3): ");
+  const choice = await askQuestion("\nMasukkan pilihan (1-5): ");
   
   let swapQueue = [];
-  if (choice === "1") {
-    swapQueue = [{ name: "USDC ke ETH", out: ADDRESSES.TOKENS.WETH }];
-  } else if (choice === "2") {
-    swapQueue = [{ name: "USDC ke USDT", out: ADDRESSES.TOKENS.USDT }];
-  } else if (choice === "3") {
-    swapQueue = [
-      { name: "USDC ke ETH",  out: ADDRESSES.TOKENS.WETH },
-      { name: "USDC ke USDT", out: ADDRESSES.TOKENS.USDT }
-    ];
-  } else {
-    console.log("❌ Pilihan tidak valid!");
-    process.exit(1);
+  const USDC = ADDRESSES.TOKENS.USDC;
+  const WETH = ADDRESSES.TOKENS.WETH;
+  const USDT = ADDRESSES.TOKENS.USDT;
+
+  switch (choice) {
+    case "1":
+      swapQueue = [{ name: "USDC ke ETH", in: USDC, out: WETH, isNative: false }];
+      break;
+    case "2":
+      swapQueue = [{ name: "USDC ke USDT", in: USDC, out: USDT, isNative: false }];
+      break;
+    case "3":
+      swapQueue = [
+        { name: "USDC ke ETH", in: USDC, out: WETH, isNative: false },
+        { name: "USDC ke USDT", in: USDC, out: USDT, isNative: false }
+      ];
+      break;
+    case "4":
+      swapQueue = [{ name: "ETH ke USDC", in: "native", out: USDC, isNative: true }];
+      break;
+    case "5":
+      swapQueue = [{ name: "USDT ke USDC", in: USDT, out: USDC, isNative: false }];
+      break;
+    default:
+      console.log("❌ Pilihan tidak valid!");
+      process.exit(1);
   }
 
   // --- PERTANYAAN JUMLAH ITERASI ---
   const inputLoops = await askQuestion("❓ Berapa kali rangkaian ini ingin diulang? ");
   const totalLoops = parseInt(inputLoops) || 1;
 
-  const tokenIn    = process.env.TOKEN_IN;
-  const amountIn   = BigInt(process.env.AMOUNT_IN);
-  const fee        = parseInt(process.env.POOL_FEE || "500");
-  const delayTime  = parseInt(process.env.DELAY_BETWEEN_SWAP || "10000");
+  const amountInRaw = process.env.AMOUNT_IN;
+  const fee         = parseInt(process.env.POOL_FEE || "500");
+  const delayTime   = parseInt(process.env.DELAY_BETWEEN_SWAP || "15000");
 
   console.log(`\n🚀 RENCANA: Mengulang ${totalLoops}x rangkaian.`);
   const confirm = await askQuestion("⚠️ Konfirmasi jalankan? (y/n): ");
@@ -102,9 +117,16 @@ async function main() {
     for (const task of swapQueue) {
       console.log(`\n[ Memulai: ${task.name} ]`);
       try {
-        const isNativeIn = ["native", "eth"].includes(tokenIn.toLowerCase());
+        // Konversi amountIn berdasarkan desimal token asal
+        const infoTokenIn = await swapper.getTokenInfo(task.in);
+        const amountIn = ethers.parseUnits(amountInRaw, 0); // Mengambil mentah dari .env (BigInt)
+
         const r = await swapper.swap({ 
-          tokenIn, tokenOut: task.out, amountIn, fee, isNativeIn 
+          tokenIn: task.in, 
+          tokenOut: task.out, 
+          amountIn: amountIn, 
+          fee, 
+          isNativeIn: task.isNative 
         });
 
         console.log(`✅ Berhasil! Hash: https://basescan.org/tx/${r.tx.hash}`);
