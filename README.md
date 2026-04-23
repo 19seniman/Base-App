@@ -113,6 +113,7 @@ npm run swap
 | Public   | `https://mainnet.base.org`          |
 | Alchemy  | `https://base-mainnet.g.alchemy.com/v2/YOUR_KEY` |
 | Infura   | `https://base-mainnet.infura.io/v3/YOUR_KEY`     |
+| 1Rpc     | `https://1rpc.io/base` |
 
 ---
 
