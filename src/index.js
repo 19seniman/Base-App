@@ -5,7 +5,7 @@ import { ADDRESSES }   from "./constants.js";
 import { formatAmount, shortenAddress } from "./utils.js";
 
 function validateEnv() {
-  const required = ["PRIVATE_KEY", "RPC_URL", "TOKEN_IN", "TOKEN_OUT", "AMOUNT_IN"];
+  const required = ["PRIVATE_KEY", "RPC_URL", "TOKEN_IN", "AMOUNT_IN"];
   const missing  = required.filter((k) => !process.env[k]);
   if (missing.length) {
     console.error(`\n❌ Variable tidak ada di .env: ${missing.join(", ")}\n`);
@@ -49,7 +49,7 @@ async function main() {
   validateEnv();
 
   console.log("\n╔════════════════════════════════════════╗");
-  console.log("║      BASE NETWORK SWAP BOT  v1.1      ║");
+  console.log("║      BASE NETWORK MULTI-SWAP BOT       ║");
   console.log("╚════════════════════════════════════════╝");
 
   const provider = new ethers.JsonRpcProvider(
@@ -76,53 +76,64 @@ async function main() {
 
   if (process.argv[2] === "check") process.exit(0);
 
-  // --- KONFIGURASI LOOPING ---
-  const iterations = parseInt(process.env.TOTAL_ITERATIONS || "1");
-  const delayTime  = parseInt(process.env.DELAY_BETWEEN_SWAP || "5000");
+  // --- DEFINISI ANTREAN TRANSAKSI ---
+  // Bot akan menjalankan tugas ini satu per satu
+  const swapQueue = [
+    { name: "SWAP USDC KE ETH",  out: ADDRESSES.TOKENS.WETH },
+    { name: "SWAP USDC KE USDT", out: ADDRESSES.TOKENS.USDT }
+  ];
 
   const tokenIn    = process.env.TOKEN_IN;
-  const tokenOut   = process.env.TOKEN_OUT;
   const amountIn   = BigInt(process.env.AMOUNT_IN);
-  const fee        = parseInt(process.env.POOL_FEE           || "3000");
+  const fee        = parseInt(process.env.POOL_FEE           || "500"); // Pakai 500 (0.05%) untuk USDC pair
   const slippage   = parseFloat(process.env.SLIPPAGE_PERCENT || "0.5");
   const deadline   = parseInt(process.env.DEADLINE_MINUTES  || "20");
-  const isNativeIn = ["native", "eth"].includes(tokenIn.toLowerCase());
+  const delayTime  = parseInt(process.env.DELAY_BETWEEN_SWAP || "10000");
 
-  console.log(`\n🚀 RENCANA: ${iterations}x Transaksi`);
-  console.log(`⏳ Jeda   : ${delayTime / 1000} detik antar swap`);
+  console.log(`\n🚀 RENCANA: Menjalankan ${swapQueue.length} Tugas Swap`);
+  console.log(`⏳ Jeda   : ${delayTime / 1000} detik antar tugas`);
 
   if (process.env.AUTO_CONFIRM !== "true") {
-    const ok = await promptConfirm("\n  ⚠️  Mulai jalankan antrean swap? (y/n): ");
+    const ok = await promptConfirm("\n  ⚠️  Mulai jalankan antrean multi-swap? (y/n): ");
     if (!ok) { console.log("  ❌ Dibatalkan.\n"); process.exit(0); }
   }
 
-  // --- LOGIKA UTAMA PERULANGAN ---
-  for (let i = 1; i <= iterations; i++) {
-    console.log(`\n[ TRANSAKSI KE-${i} DARI ${iterations} ]`);
+  // --- LOGIKA UTAMA EKSEKUSI ANTREAN ---
+  for (let i = 0; i < swapQueue.length; i++) {
+    const task = swapQueue[i];
+    console.log(`\n[ TUGAS ${i + 1}: ${task.name} ]`);
     
     try {
+      const isNativeIn = ["native", "eth"].includes(tokenIn.toLowerCase());
+      
       const r = await swapper.swap({ 
-        tokenIn, tokenOut, amountIn, fee, slippage, 
-        deadlineMin: deadline, isNativeIn 
+        tokenIn, 
+        tokenOut: task.out, 
+        amountIn, 
+        fee, 
+        slippage, 
+        deadlineMin: deadline, 
+        isNativeIn 
       });
 
-      console.log(`\n✅ BERHASIL KE-${i}`);
-      console.log(`   Hash: ${r.tx.hash}`);
+      console.log(`\n✅ BERHASIL: ${task.name}`);
+      console.log(`   Hash: https://basescan.org/tx/${r.tx.hash}`);
 
-      if (i < iterations) {
-        console.log(`\n⏳ Menunggu ${delayTime / 1000} detik sebelum transaksi berikutnya...`);
+      // Jika masih ada antrean berikutnya, beri jeda
+      if (i < swapQueue.length - 1) {
+        console.log(`\n⏳ Menunggu ${delayTime / 1000} detik sebelum tugas berikutnya...`);
         await new Promise(resolve => setTimeout(resolve, delayTime));
       }
     } catch (err) {
-      console.error(`\n❌ Gagal pada transaksi ke-${i}: ${err.message}`);
-      if (i < iterations) {
-        console.log("⏩ Melanjutkan ke transaksi berikutnya dalam 3 detik...");
+      console.error(`\n❌ Gagal pada ${task.name}: ${err.message}`);
+      if (i < swapQueue.length - 1) {
+        console.log("⏩ Lanjut ke tugas berikutnya dalam 3 detik...");
         await new Promise(resolve => setTimeout(resolve, 3000));
       }
     }
   }
 
-  console.log("\n✨ SEMUA TUGAS SELESAI!");
+  console.log("\n✨ SEMUA TUGAS ANTREAN SELESAI!");
   await checkBalances(swapper);
   process.exit(0);
 }
