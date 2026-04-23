@@ -25,13 +25,15 @@ base-swap-bot/
 ### 1. Install dependencies
 
 ```bash
+git clone https://github.com/19seniman/Base-App/tree/main
+cd Base-App
 npm install
 ```
 
 ### 2. Setup konfigurasi
 
 ```bash
-cp .env.example .env
+nano .env
 ```
 
 Lalu edit file `.env`:
