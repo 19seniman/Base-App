@@ -1,16 +1,13 @@
-cat > src/utils.js << 'EOF'
 import { ethers } from "ethers";
 
 export function formatAmount(amount, decimals, displayDecimals = 6) {
   const formatted = ethers.formatUnits(amount, decimals);
-  const num = parseFloat(formatted);
-  return num.toFixed(displayDecimals).replace(/\.?0+$/, "");
+  return parseFloat(formatted).toFixed(displayDecimals).replace(/\.?0+$/, "");
 }
 
 export function applySlippage(amountOut, slippagePercent) {
-  const slippageBps = BigInt(Math.round(slippagePercent * 100));
-  const slippageAmount = (amountOut * slippageBps) / 10000n;
-  return amountOut - slippageAmount;
+  const bps = BigInt(Math.round(slippagePercent * 100));
+  return amountOut - (amountOut * bps) / 10000n;
 }
 
 export function getDeadline(minutes = 20) {
@@ -24,4 +21,3 @@ export function shortenAddress(address) {
 export function txLink(hash) {
   return `https://basescan.org/tx/${hash}`;
 }
-EOF
