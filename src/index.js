@@ -96,7 +96,7 @@ async function main(isAuto = false) {
 
   if (!isAuto) {
     console.log("\n╔════════════════════════════════════════╗");
-    console.log("║      BASE NETWORK AUTO-CRON BOT        ║");
+    console.log("║      BASE NETWORK BY 19SENIMAN        ║");
     console.log("╚════════════════════════════════════════╝");
     await checkBalances(swapper);
 
