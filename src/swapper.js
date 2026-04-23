@@ -128,7 +128,7 @@ export class BaseSwapper {
     let gasLimit;
     try {
       const est = await this.router.exactInputSingle.estimateGas(swapParams);
-      gasLimit  = (est * 130n) / 100n;
+      gasLimit = (est * 110n) / 100n;
     } catch {
       gasLimit = 400000n;
     }
