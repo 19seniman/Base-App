@@ -19,12 +19,16 @@ async function checkBalances(swapper) {
   const ethBal = await swapper.provider.getBalance(swapper.wallet.address);
   console.log(`  Alamat : ${swapper.wallet.address}`);
   console.log(`  ETH    : ${formatAmount(ethBal, 18)} ETH`);
+
   for (const [name, addr] of Object.entries(ADDRESSES.TOKENS)) {
     try {
+      // Tambahkan delay 200ms setiap cek saldo agar tidak kena rate limit
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
       const info = await swapper.getTokenInfo(addr);
       console.log(`  ${name.padEnd(6)}: ${formatAmount(info.balance, info.decimals)} ${info.symbol}`);
-    } catch {
-      console.log(`  ${name.padEnd(6)}: -`);
+    } catch (err) {
+      console.log(`  ${name.padEnd(6)}: - (RPC Timeout)`);
     }
   }
   console.log("─".repeat(42));
@@ -45,7 +49,9 @@ async function main() {
   console.log("║      BASE NETWORK SWAP BOT  v1.0      ║");
   console.log("╚════════════════════════════════════════╝");
 
-  const provider = new ethers.JsonRpcProvider(process.env.RPC_URL, undefined, {staticNetwork: true });
+  const provider = new ethers.JsonRpcProvider(process.env.RPC_URL, undefined, {
+    staticNetwork: true
+});
   const wallet   = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
   const swapper  = new BaseSwapper(provider, wallet);
 
