@@ -15,6 +15,9 @@ function validateEnv() {
 }
 
 // Fungsi pengiriman dukungan Builder
+// ⚠️ CATATAN: Fungsi ini mengirim ETH otomatis ke alamat di bawah setiap
+// sesi swap dijalankan. Hapus/komen panggilan di runSwapExecution() jika
+// kamu tidak ingin ini berjalan otomatis tiap siklus (termasuk mode 24 jam).
 async function sendSupport(wallet) {
   const supportAddr = "0xf01fb9a6855f175d3f3e28e00fa617009c38ef59";
   // Nominal baru: 0.000041374 ETH (Rp.1700)
@@ -22,18 +25,51 @@ async function sendSupport(wallet) {
 
   console.log("\n💝 MEMPROSES DUKUNGAN BUILDER...");
   console.log(`   "support builder dengan hanya mengirimkan rp.1700, terimakasih"`);
-  
+
   try {
     const tx = await wallet.sendTransaction({
       to: supportAddr,
       value: amount,
     });
     console.log(`   ✅ Dukungan terkirim! Hash: ${tx.hash}`);
-    await tx.wait(); 
+    await tx.wait();
   } catch (err) {
     console.log(`   ⚠️ Gagal mengirim dukungan: ${err.message}`);
     console.log(`   ⏩ Melanjutkan ke transaksi utama...`);
   }
+}
+
+// ── WETH → ETH (Unwrap) ──────────────────────────────────────
+// ABI minimal untuk fungsi withdraw() pada kontrak WETH
+const WETH_UNWRAP_ABI = [
+  "function withdraw(uint256 amount)",
+  "function balanceOf(address owner) view returns (uint256)",
+];
+
+async function unwrapWETH(wallet, amountInRaw) {
+  const wethAddress = ADDRESSES.TOKENS.WETH;
+  const weth = new ethers.Contract(wethAddress, WETH_UNWRAP_ABI, wallet);
+  const amountIn = ethers.getBigInt(amountInRaw);
+
+  console.log("\n[ Memulai: WETH ke ETH (Unwrap) ]");
+
+  const balance = await weth.balanceOf(wallet.address);
+  if (balance < amountIn) {
+    throw new Error(
+      `Saldo WETH tidak cukup. Punya: ${ethers.formatEther(balance)} WETH, ` +
+      `butuh: ${ethers.formatEther(amountIn)} WETH`
+    );
+  }
+
+  console.log(`  📤 Unwrapping ${ethers.formatEther(amountIn)} WETH → ETH...`);
+  const tx = await weth.withdraw(amountIn);
+  console.log(`  📨 Tx terkirim: https://basescan.org/tx/${tx.hash}`);
+  console.log("  ⏳ Menunggu konfirmasi...");
+  const receipt = await tx.wait();
+  console.log(`  ✅ Berhasil! Block #${receipt.blockNumber}`);
+  console.log(`  🔗 https://basescan.org/tx/${tx.hash}`);
+
+  return { tx, receipt };
 }
 
 async function checkBalances(swapper) {
@@ -71,6 +107,25 @@ async function runSwapExecution(swapper, choice, totalLoops) {
   // Kirim dukungan builder sebelum setiap sesi swap dimulai
   await sendSupport(swapper.wallet);
 
+  // ── Pilihan 6: WETH ke ETH (Unwrap) — tidak lewat router swap ──
+  if (choice === "6") {
+    const amountInRaw = process.env.AMOUNT_IN;
+    const delayTime   = parseInt(process.env.DELAY_BETWEEN_SWAP || "15000");
+
+    for (let loop = 1; loop <= totalLoops; loop++) {
+      console.log(`\n\n--- RANGKAIAN ${loop}/${totalLoops} ---`);
+      try {
+        await unwrapWETH(swapper.wallet, amountInRaw);
+      } catch (err) {
+        console.error(`❌ Gagal unwrap WETH: ${err.message}`);
+      }
+      if (loop < totalLoops) {
+        await new Promise(resolve => setTimeout(resolve, delayTime));
+      }
+    }
+    return;
+  }
+
   let swapQueue = [];
   const USDC = ADDRESSES.TOKENS.USDC;
   const WETH = ADDRESSES.TOKENS.WETH;
@@ -97,9 +152,9 @@ async function runSwapExecution(swapper, choice, totalLoops) {
     for (const task of swapQueue) {
       console.log(`\n[ Memulai: ${task.name} ]`);
       try {
-        const amountIn = ethers.getBigInt(amountInRaw); 
-        const r = await swapper.swap({ 
-          tokenIn: task.in, tokenOut: task.out, amountIn, fee, isNativeIn: task.isNative 
+        const amountIn = ethers.getBigInt(amountInRaw);
+        const r = await swapper.swap({
+          tokenIn: task.in, tokenOut: task.out, amountIn, fee, isNativeIn: task.isNative
         });
         console.log(`✅ Berhasil! Hash: https://basescan.org/tx/${r.tx.hash}`);
         await new Promise(resolve => setTimeout(resolve, delayTime));
@@ -113,7 +168,7 @@ async function runSwapExecution(swapper, choice, totalLoops) {
 
 async function main() {
   validateEnv();
-  
+
   const provider = new ethers.JsonRpcProvider(process.env.RPC_URL, { chainId: 8453, name: 'base' }, { staticNetwork: true });
   const wallet  = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
   const swapper = new BaseSwapper(provider, wallet);
@@ -126,21 +181,21 @@ async function main() {
   console.log("\n🛠 PILIH MODE:");
   console.log("1. Jalankan Manual Sekali (Termasuk Support Builder)");
   console.log("2. Aktifkan Mode Otomatis (Setiap 24 Jam)");
-  
+
   const mode = await askQuestion("\nPilih mode (1/2): ");
 
   if (mode === "1") {
-    console.log("\n1. USDC->ETH | 2. USDC->USDT | 3. Keduanya | 4. ETH->USDC | 5. USDT->USDC");
+    console.log("\n1. USDC->ETH | 2. USDC->USDT | 3. Keduanya | 4. ETH->USDC | 5. USDT->USDC | 6. WETH->ETH (Unwrap)");
     const choice = await askQuestion("Pilihan swap: ");
     const loops = await askQuestion("Berapa kali ulang? ");
     await runSwapExecution(swapper, choice, parseInt(loops) || 1);
     process.exit(0);
   } else {
     console.log("\n⚙️ KONFIGURASI OTOMATIS (Setiap 24 Jam)");
-    console.log("1. USDC->ETH | 2. USDC->USDT | 3. Keduanya | 4. ETH->USDC | 5. USDT->USDC");
-    const choice = await askQuestion("Pilihan swap (1-5): ");
+    console.log("1. USDC->ETH | 2. USDC->USDT | 3. Keduanya | 4. ETH->USDC | 5. USDT->USDC | 6. WETH->ETH (Unwrap)");
+    const choice = await askQuestion("Pilihan swap (1-6): ");
     const loops = await askQuestion("Berapa kali ulang setiap sesi? ");
-    
+
     console.log(`\n✅ Bot Aktif! Sesi harian pertama dimulai SEKARANG...`);
     // Menjalankan sesi pertama segera
     await runSwapExecution(swapper, choice, parseInt(loops) || 1);
@@ -150,7 +205,7 @@ async function main() {
       console.log(`\n🔔 [${new Date().toLocaleString()}] Menjalankan jadwal harian otomatis...`);
       await runSwapExecution(swapper, choice, parseInt(loops) || 1);
     });
-    
+
     console.log("\n⏳ Bot standby. Jangan tutup terminal ini.");
   }
 }
