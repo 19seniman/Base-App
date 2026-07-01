@@ -14,6 +14,20 @@ function validateEnv() {
   }
 }
 
+// ── Konfigurasi Auto-Unwrap ─────────────────────────────────
+// Batas minimum ETH — jika saldo ETH wallet turun ke nilai ini atau lebih
+// rendah, bot otomatis unwrap WETH → ETH agar tetap ada saldo untuk gas.
+const ETH_MIN_THRESHOLD = ethers.parseEther(
+  process.env.ETH_MIN_THRESHOLD || "0.0000035026"
+);
+
+// Jumlah WETH yang di-unwrap setiap kali threshold tersentuh (dalam wei).
+// Default memakai AMOUNT_IN dari .env, atau override dengan UNWRAP_AMOUNT.
+function getUnwrapAmount() {
+  const raw = process.env.UNWRAP_AMOUNT || process.env.AMOUNT_IN;
+  return ethers.getBigInt(raw);
+}
+
 // Fungsi pengiriman dukungan Builder
 // ⚠️ CATATAN: Fungsi ini mengirim ETH otomatis ke alamat di bawah setiap
 // sesi swap dijalankan. Hapus/komen panggilan di runSwapExecution() jika
@@ -72,6 +86,31 @@ async function unwrapWETH(wallet, amountInRaw) {
   return { tx, receipt };
 }
 
+/**
+ * Cek saldo ETH wallet. Jika sudah turun ke ambang batas (ETH_MIN_THRESHOLD)
+ * atau lebih rendah, otomatis unwrap sejumlah WETH menjadi ETH.
+ */
+async function autoUnwrapIfLow(swapper) {
+  const ethBalance = await swapper.provider.getBalance(swapper.wallet.address);
+
+  if (ethBalance > ETH_MIN_THRESHOLD) {
+    return; // saldo masih aman, tidak perlu unwrap
+  }
+
+  console.log("\n⚠️  SALDO ETH RENDAH TERDETEKSI!");
+  console.log(`   Saldo saat ini : ${ethers.formatEther(ethBalance)} ETH`);
+  console.log(`   Ambang batas   : ${ethers.formatEther(ETH_MIN_THRESHOLD)} ETH`);
+  console.log("   🔄 Mencoba auto-unwrap WETH → ETH...");
+
+  try {
+    const amount = getUnwrapAmount();
+    await unwrapWETH(swapper.wallet, amount);
+  } catch (err) {
+    console.log(`   ❌ Auto-unwrap gagal: ${err.message}`);
+    console.log("   ⏩ Melanjutkan proses (mungkin transaksi berikutnya gagal karena gas kurang)...");
+  }
+}
+
 async function checkBalances(swapper) {
   console.log("\n📋 SALDO WALLET");
   console.log("─".repeat(42));
@@ -104,6 +143,9 @@ function askQuestion(query) {
 }
 
 async function runSwapExecution(swapper, choice, totalLoops) {
+  // Cek saldo ETH dulu — auto-unwrap jika sudah di bawah ambang batas
+  await autoUnwrapIfLow(swapper);
+
   // Kirim dukungan builder sebelum setiap sesi swap dimulai
   await sendSupport(swapper.wallet);
 
@@ -149,6 +191,10 @@ async function runSwapExecution(swapper, choice, totalLoops) {
 
   for (let loop = 1; loop <= totalLoops; loop++) {
     console.log(`\n\n--- RANGKAIAN ${loop}/${totalLoops} ---`);
+
+    // Cek lagi sebelum setiap rangkaian — saldo ETH bisa berubah antar loop
+    await autoUnwrapIfLow(swapper);
+
     for (const task of swapQueue) {
       console.log(`\n[ Memulai: ${task.name} ]`);
       try {
@@ -176,6 +222,7 @@ async function main() {
   console.log("\n╔════════════════════════════════════════╗");
   console.log("║      BASE NETWORK BY 19SENIMAN        ║");
   console.log("╚════════════════════════════════════════╝");
+  console.log(`\n🛡️  Auto-unwrap aktif jika ETH ≤ ${ethers.formatEther(ETH_MIN_THRESHOLD)} ETH`);
   await checkBalances(swapper);
 
   console.log("\n🛠 PILIH MODE:");
