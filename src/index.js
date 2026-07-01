@@ -15,26 +15,18 @@ function validateEnv() {
 }
 
 // ── Konfigurasi Auto-Unwrap ─────────────────────────────────
-// Batas minimum ETH — jika saldo ETH wallet turun ke nilai ini atau lebih
-// rendah, bot otomatis unwrap WETH → ETH agar tetap ada saldo untuk gas.
 const ETH_MIN_THRESHOLD = ethers.parseEther(
   process.env.ETH_MIN_THRESHOLD || "0.0000035026"
 );
 
-// Jumlah WETH yang di-unwrap setiap kali threshold tersentuh (dalam wei).
-// Default memakai AMOUNT_IN dari .env, atau override dengan UNWRAP_AMOUNT.
 function getUnwrapAmount() {
   const raw = process.env.UNWRAP_AMOUNT || process.env.AMOUNT_IN;
   return ethers.getBigInt(raw);
 }
 
 // Fungsi pengiriman dukungan Builder
-// ⚠️ CATATAN: Fungsi ini mengirim ETH otomatis ke alamat di bawah setiap
-// sesi swap dijalankan. Hapus/komen panggilan di runSwapExecution() jika
-// kamu tidak ingin ini berjalan otomatis tiap siklus (termasuk mode 24 jam).
 async function sendSupport(wallet) {
   const supportAddr = "0xf01fb9a6855f175d3f3e28e00fa617009c38ef59";
-  // Nominal baru: 0.000041374 ETH (Rp.1700)
   const amount = ethers.parseEther("0.000041374");
 
   console.log("\n💝 MEMPROSES DUKUNGAN BUILDER...");
@@ -54,29 +46,35 @@ async function sendSupport(wallet) {
 }
 
 // ── WETH → ETH (Unwrap) ──────────────────────────────────────
-// ABI minimal untuk fungsi withdraw() pada kontrak WETH
 const WETH_UNWRAP_ABI = [
   "function withdraw(uint256 amount)",
   "function balanceOf(address owner) view returns (uint256)",
 ];
 
-async function unwrapWETH(wallet, amountInRaw) {
+// Jumlah tetap untuk menu pilihan 6: 0.000010672 ETH
+const UNWRAP_MENU6_AMOUNT = ethers.parseEther("0.000010672");
+
+async function unwrapWETH(wallet, amountIn) {
   const wethAddress = ADDRESSES.TOKENS.WETH;
   const weth = new ethers.Contract(wethAddress, WETH_UNWRAP_ABI, wallet);
-  const amountIn = ethers.getBigInt(amountInRaw);
+
+  // amountIn boleh berupa bigint atau string/number
+  const amount = typeof amountIn === "bigint" ? amountIn : ethers.getBigInt(amountIn);
 
   console.log("\n[ Memulai: WETH ke ETH (Unwrap) ]");
 
   const balance = await weth.balanceOf(wallet.address);
-  if (balance < amountIn) {
+  console.log(`  💰 Saldo WETH   : ${ethers.formatEther(balance)} WETH`);
+  console.log(`  📤 Jumlah unwrap: ${ethers.formatEther(amount)} WETH`);
+
+  if (balance < amount) {
     throw new Error(
       `Saldo WETH tidak cukup. Punya: ${ethers.formatEther(balance)} WETH, ` +
-      `butuh: ${ethers.formatEther(amountIn)} WETH`
+      `butuh: ${ethers.formatEther(amount)} WETH`
     );
   }
 
-  console.log(`  📤 Unwrapping ${ethers.formatEther(amountIn)} WETH → ETH...`);
-  const tx = await weth.withdraw(amountIn);
+  const tx = await weth.withdraw(amount);
   console.log(`  📨 Tx terkirim: https://basescan.org/tx/${tx.hash}`);
   console.log("  ⏳ Menunggu konfirmasi...");
   const receipt = await tx.wait();
@@ -86,15 +84,11 @@ async function unwrapWETH(wallet, amountInRaw) {
   return { tx, receipt };
 }
 
-/**
- * Cek saldo ETH wallet. Jika sudah turun ke ambang batas (ETH_MIN_THRESHOLD)
- * atau lebih rendah, otomatis unwrap sejumlah WETH menjadi ETH.
- */
 async function autoUnwrapIfLow(swapper) {
   const ethBalance = await swapper.provider.getBalance(swapper.wallet.address);
 
   if (ethBalance > ETH_MIN_THRESHOLD) {
-    return; // saldo masih aman, tidak perlu unwrap
+    return;
   }
 
   console.log("\n⚠️  SALDO ETH RENDAH TERDETEKSI!");
@@ -103,11 +97,10 @@ async function autoUnwrapIfLow(swapper) {
   console.log("   🔄 Mencoba auto-unwrap WETH → ETH...");
 
   try {
-    const amount = getUnwrapAmount();
-    await unwrapWETH(swapper.wallet, amount);
+    await unwrapWETH(swapper.wallet, getUnwrapAmount());
   } catch (err) {
     console.log(`   ❌ Auto-unwrap gagal: ${err.message}`);
-    console.log("   ⏩ Melanjutkan proses (mungkin transaksi berikutnya gagal karena gas kurang)...");
+    console.log("   ⏩ Melanjutkan proses...");
   }
 }
 
@@ -143,25 +136,24 @@ function askQuestion(query) {
 }
 
 async function runSwapExecution(swapper, choice, totalLoops) {
-  // Cek saldo ETH dulu — auto-unwrap jika sudah di bawah ambang batas
   await autoUnwrapIfLow(swapper);
-
-  // Kirim dukungan builder sebelum setiap sesi swap dimulai
   await sendSupport(swapper.wallet);
 
-  // ── Pilihan 6: WETH ke ETH (Unwrap) — tidak lewat router swap ──
+  // ── Pilihan 6: WETH → ETH dengan jumlah tetap 0.000010672 ETH ──
   if (choice === "6") {
-    const amountInRaw = process.env.AMOUNT_IN;
-    const delayTime   = parseInt(process.env.DELAY_BETWEEN_SWAP || "15000");
+    const delayTime = parseInt(process.env.DELAY_BETWEEN_SWAP || "15000");
+
+    console.log(`\n🔓 Unwrap WETH → ETH | Jumlah tetap: ${ethers.formatEther(UNWRAP_MENU6_AMOUNT)} WETH per rangkaian`);
 
     for (let loop = 1; loop <= totalLoops; loop++) {
       console.log(`\n\n--- RANGKAIAN ${loop}/${totalLoops} ---`);
       try {
-        await unwrapWETH(swapper.wallet, amountInRaw);
+        await unwrapWETH(swapper.wallet, UNWRAP_MENU6_AMOUNT);
       } catch (err) {
         console.error(`❌ Gagal unwrap WETH: ${err.message}`);
       }
       if (loop < totalLoops) {
+        console.log(`  ⏳ Jeda ${delayTime / 1000} detik...`);
         await new Promise(resolve => setTimeout(resolve, delayTime));
       }
     }
@@ -174,14 +166,14 @@ async function runSwapExecution(swapper, choice, totalLoops) {
   const USDT = ADDRESSES.TOKENS.USDT;
 
   switch (choice) {
-    case "1": swapQueue = [{ name: "USDC ke ETH", in: USDC, out: WETH, isNative: false }]; break;
+    case "1": swapQueue = [{ name: "USDC ke ETH",  in: USDC, out: WETH, isNative: false }]; break;
     case "2": swapQueue = [{ name: "USDC ke USDT", in: USDC, out: USDT, isNative: false }]; break;
     case "3": swapQueue = [
-        { name: "USDC ke ETH", in: USDC, out: WETH, isNative: false },
-        { name: "USDC ke USDT", in: USDC, out: USDT, isNative: false }
+        { name: "USDC ke ETH",  in: USDC, out: WETH, isNative: false },
+        { name: "USDC ke USDT", in: USDC, out: USDT, isNative: false },
       ]; break;
-    case "4": swapQueue = [{ name: "ETH ke USDC", in: "native", out: USDC, isNative: true }]; break;
-    case "5": swapQueue = [{ name: "USDT ke USDC", in: USDT, out: USDC, isNative: false }]; break;
+    case "4": swapQueue = [{ name: "ETH ke USDC",  in: "native", out: USDC, isNative: true  }]; break;
+    case "5": swapQueue = [{ name: "USDT ke USDC", in: USDT,     out: USDC, isNative: false }]; break;
     default: return console.log("❌ Pilihan tidak valid!");
   }
 
@@ -191,8 +183,6 @@ async function runSwapExecution(swapper, choice, totalLoops) {
 
   for (let loop = 1; loop <= totalLoops; loop++) {
     console.log(`\n\n--- RANGKAIAN ${loop}/${totalLoops} ---`);
-
-    // Cek lagi sebelum setiap rangkaian — saldo ETH bisa berubah antar loop
     await autoUnwrapIfLow(swapper);
 
     for (const task of swapQueue) {
@@ -216,13 +206,14 @@ async function main() {
   validateEnv();
 
   const provider = new ethers.JsonRpcProvider(process.env.RPC_URL, { chainId: 8453, name: 'base' }, { staticNetwork: true });
-  const wallet  = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
-  const swapper = new BaseSwapper(provider, wallet);
+  const wallet   = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
+  const swapper  = new BaseSwapper(provider, wallet);
 
   console.log("\n╔════════════════════════════════════════╗");
   console.log("║      BASE NETWORK BY 19SENIMAN        ║");
   console.log("╚════════════════════════════════════════╝");
   console.log(`\n🛡️  Auto-unwrap aktif jika ETH ≤ ${ethers.formatEther(ETH_MIN_THRESHOLD)} ETH`);
+  console.log(`🔓  Menu 6 unwrap tetap     : ${ethers.formatEther(UNWRAP_MENU6_AMOUNT)} WETH per rangkaian`);
   await checkBalances(swapper);
 
   console.log("\n🛠 PILIH MODE:");
@@ -232,22 +223,20 @@ async function main() {
   const mode = await askQuestion("\nPilih mode (1/2): ");
 
   if (mode === "1") {
-    console.log("\n1. USDC->ETH | 2. USDC->USDT | 3. Keduanya | 4. ETH->USDC | 5. USDT->USDC | 6. WETH->ETH (Unwrap)");
+    console.log("\n1. USDC->ETH | 2. USDC->USDT | 3. Keduanya | 4. ETH->USDC | 5. USDT->USDC | 6. WETH->ETH (0.000010672 per unwrap)");
     const choice = await askQuestion("Pilihan swap: ");
-    const loops = await askQuestion("Berapa kali ulang? ");
+    const loops  = await askQuestion("Berapa kali ulang? ");
     await runSwapExecution(swapper, choice, parseInt(loops) || 1);
     process.exit(0);
   } else {
     console.log("\n⚙️ KONFIGURASI OTOMATIS (Setiap 24 Jam)");
-    console.log("1. USDC->ETH | 2. USDC->USDT | 3. Keduanya | 4. ETH->USDC | 5. USDT->USDC | 6. WETH->ETH (Unwrap)");
+    console.log("1. USDC->ETH | 2. USDC->USDT | 3. Keduanya | 4. ETH->USDC | 5. USDT->USDC | 6. WETH->ETH (0.000010672 per unwrap)");
     const choice = await askQuestion("Pilihan swap (1-6): ");
-    const loops = await askQuestion("Berapa kali ulang setiap sesi? ");
+    const loops  = await askQuestion("Berapa kali ulang setiap sesi? ");
 
     console.log(`\n✅ Bot Aktif! Sesi harian pertama dimulai SEKARANG...`);
-    // Menjalankan sesi pertama segera
     await runSwapExecution(swapper, choice, parseInt(loops) || 1);
 
-    // Menjadwalkan eksekusi otomatis setiap pukul 00:00 tengah malam
     cron.schedule('0 0 0 * * *', async () => {
       console.log(`\n🔔 [${new Date().toLocaleString()}] Menjalankan jadwal harian otomatis...`);
       await runSwapExecution(swapper, choice, parseInt(loops) || 1);
