@@ -58,6 +58,9 @@ const UNWRAP_MENU6_AMOUNT = ethers.parseEther("0.000010672");
 // Jumlah tetap untuk menu pilihan 7: ETH → USDT
 const ETH_TO_USDT_AMOUNT = ethers.parseEther("0.0000061803");
 
+// Jumlah tetap untuk menu pilihan 4: ETH → USDC
+const ETH_TO_USDC_AMOUNT = ethers.parseEther("0.0000061803");
+
 async function unwrapWETH(wallet, amountIn) {
   const wethAddress = ADDRESSES.TOKENS.WETH;
   const weth = new ethers.Contract(wethAddress, WETH_UNWRAP_ABI, wallet);
@@ -185,7 +188,7 @@ async function runSwapExecution(swapper, choice, totalLoops) {
       ];
       break;
     case "4":
-      swapQueue = [{ name: "ETH ke USDC",  in: "native", out: USDC, isNative: true  }];
+      swapQueue = [{ name: "ETH ke USDC", in: "native", out: USDC, isNative: true, fixedAmount: ETH_TO_USDC_AMOUNT }];
       break;
     case "5":
       swapQueue = [{ name: "USDT ke USDC", in: USDT,     out: USDC, isNative: false }];
