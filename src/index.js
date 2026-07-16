@@ -446,6 +446,7 @@ async function main() {
   console.log(`🔓  Menu 6 unwrap tetap : ${ethers.formatEther(UNWRAP_MENU6_AMOUNT)} WETH`);
 
   await checkBalances(baseProvider, wallet, "base");
+  await checkBalances(rhProvider, wallet.connect(rhProvider), "robinhood");
 
   console.log("\n🛠  PILIH MODE:");
   console.log("  1. Jalankan Manual Sekali");
