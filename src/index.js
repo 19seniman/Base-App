@@ -220,15 +220,60 @@ async function getQuoteLiFi({ fromChain, toChain, fromToken, toToken, fromAmount
   return data;
 }
 
+async function wrapETH(provider, wallet, netKey, amount) {
+  const net  = NETWORKS[netKey];
+  const weth = new ethers.Contract(net.tokens.WETH, WETH_ABI, wallet);
+  console.log(`  📦 Wrapping ${ethers.formatEther(amount)} ETH → WETH...`);
+  const tx = await weth.deposit({ value: amount });
+  console.log(`  📨 Tx wrap: ${txUrl(netKey, tx.hash)}`);
+  await tx.wait();
+  console.log("  ✅ Wrap selesai.");
+}
+
 async function swapViaLiFi({ provider, wallet, netKey, tokenIn, tokenOut, amountIn, slippage }) {
   const net   = NETWORKS[netKey];
   const inOvr = net.tokenOverrides[tokenIn.toLowerCase()]  || { symbol: "???", decimals: 18 };
   const outOvr= net.tokenOverrides[tokenOut.toLowerCase()] || { symbol: "???", decimals: 18 };
+  const isWETHIn = tokenIn.toLowerCase() === net.tokens.WETH.toLowerCase();
 
-  // Cek saldo
-  const balance = await getBalance(provider, tokenIn, wallet.address);
-  if (balance < amountIn) {
-    throw new Error(`Saldo ${inOvr.symbol} tidak cukup. Punya: ${fmt(balance, inOvr.decimals)}, butuh: ${fmt(amountIn, inOvr.decimals)}`);
+  // ── Cek saldo & auto-wrap ETH → WETH jika perlu ──────────
+  const wethBalance = isWETHIn ? await getBalance(provider, tokenIn, wallet.address) : 0n;
+  const ethBalance  = isWETHIn ? await provider.getBalance(wallet.address) : 0n;
+
+  if (isWETHIn && wethBalance < amountIn) {
+    // ETH yang bisa dipakai = total ETH - gas reserve
+    const ethForSwap  = ethBalance > GAS_RESERVE ? ethBalance - GAS_RESERVE : 0n;
+    const totalAvail  = wethBalance + ethForSwap;
+
+    if (totalAvail < amountIn) {
+      throw new Error(
+        `Saldo tidak cukup (termasuk cadangan gas ${ethers.formatEther(GAS_RESERVE)} ETH)!\n` +
+        `  WETH       : ${fmt(wethBalance, 18)} WETH\n` +
+        `  ETH        : ${fmt(ethBalance, 18)} ETH\n` +
+        `  Gas reserve: ${ethers.formatEther(GAS_RESERVE)} ETH (tidak boleh dipakai swap)\n` +
+        `  Tersedia   : ${fmt(totalAvail, 18)} ETH/WETH\n` +
+        `  Butuh      : ${fmt(amountIn, 18)} WETH\n` +
+        `  💡 Kurangi RH_AMOUNT_IN di .env menjadi ≤ ${totalAvail.toString()}`
+      );
+    }
+
+    // Wrap ETH secukupnya, sisakan gas
+    const wrapNeeded = amountIn - wethBalance;
+    if (wrapNeeded > 0n) {
+      console.log(`  ⚠️  WETH kurang, auto-wrap ${fmt(wrapNeeded, 18)} ETH → WETH...`);
+      console.log(`  🛡️  Sisa ETH untuk gas: ${fmt(ethBalance - wrapNeeded, 18)} ETH`);
+      await wrapETH(provider, wallet, netKey, wrapNeeded);
+    }
+  } else if (!isWETHIn) {
+    // Token selain WETH — cek saldo biasa
+    const balance = await getBalance(provider, tokenIn, wallet.address);
+    if (balance < amountIn) {
+      throw new Error(
+        `Saldo ${inOvr.symbol} tidak cukup.\n` +
+        `  Punya : ${fmt(balance, inOvr.decimals)} ${inOvr.symbol}\n` +
+        `  Butuh : ${fmt(amountIn, inOvr.decimals)} ${inOvr.symbol}`
+      );
+    }
   }
 
   // Ambil quote dari LI.FI
@@ -348,6 +393,10 @@ async function doUnwrap(provider, wallet, netKey, amount) {
 //  AUTO-UNWRAP JIKA SALDO ETH RENDAH (BASE)
 // ══════════════════════════════════════════════════════
 const ETH_MIN_THRESHOLD   = ethers.parseEther(process.env.ETH_MIN_THRESHOLD || "0.0000035026");
+
+// Jumlah ETH yang selalu disisakan untuk bayar gas (tidak boleh dipakai swap)
+// Default 0.00003 ETH — cukup untuk ~3-5 transaksi di Robinhood Chain
+const GAS_RESERVE = ethers.parseEther(process.env.GAS_RESERVE || "0.00003");
 const UNWRAP_MENU6_AMOUNT = ethers.parseEther("0.000010672");
 
 async function autoUnwrapIfLow(provider, wallet) {
