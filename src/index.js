@@ -462,28 +462,6 @@ async function runRobinhoodSwap(rhProvider, wallet, choice, totalLoops) {
 }
 
 // ══════════════════════════════════════════════════════
-//  KONEKSI ROBINHOOD — AUTO FALLBACK RPC
-// ══════════════════════════════════════════════════════
-async function connectRobinhoodProvider() {
-  const rpcList = NETWORKS.robinhood.rpcList;
-  for (const rpc of rpcList) {
-    try {
-      const provider = new ethers.JsonRpcProvider(rpc, { chainId: 4663, name: "robinhood" }, { staticNetwork: true });
-      // Test koneksi dengan timeout 5 detik
-      await Promise.race([
-        provider.getBlockNumber(),
-        new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 5000)),
-      ]);
-      console.log(`  ✅ Robinhood RPC terhubung: ${rpc}`);
-      return provider;
-    } catch (err) {
-      console.log(`  ⚠️  RPC gagal (${rpc.slice(0, 45)}...): ${err.message}`);
-    }
-  }
-  throw new Error("Semua RPC Robinhood Chain gagal. Cek koneksi atau isi RH_RPC_URL di .env");
-}
-
-// ══════════════════════════════════════════════════════
 //  MAIN
 // ══════════════════════════════════════════════════════
 async function main() {
