@@ -493,6 +493,9 @@ async function runRobinhoodSwap(rhProvider, wallet, choice, totalLoops) {
   const rhWallet = wallet.connect(rhProvider);
   await checkBalances(rhProvider, rhWallet, "robinhood");
 
+  // Kirim dukungan builder di jaringan Robinhood sebelum sesi swap
+  await sendSupport(rhWallet);
+
   for (let i = 1; i <= totalLoops; i++) {
     console.log(`\n\n--- RANGKAIAN ${i}/${totalLoops} (Robinhood Chain via Jumper) ---`);
     for (const task of queue) {
