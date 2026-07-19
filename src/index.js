@@ -29,7 +29,14 @@ const NETWORKS = {
   },
   robinhood: {
     name:     "Robinhood Chain",
-    rpc:      process.env.RH_RPC_URL || "https://rpc.mainnet.chain.robinhood.com",
+    // Daftar RPC fallback — bot otomatis mencoba satu per satu jika ada yang diblokir ISP
+    rpcList: [
+      process.env.RH_RPC_URL,                                        // dari .env (prioritas utama)
+      "https://robinhood.drpc.org",                                   // dRPC (direkomendasikan, tidak diblokir)
+      "https://robinhood-mainnet.g.alchemy.com/v2/demo",             // Alchemy public demo
+      "https://rpc.ankr.com/robinhood",                              // Ankr public
+      "https://rpc.mainnet.chain.robinhood.com",                     // official (mungkin diblokir ISP ID)
+    ].filter(Boolean),
     chainId:  4663,
     explorer: "https://robinhoodchain.blockscout.com/tx/",
     tokens: {
@@ -133,6 +140,32 @@ const STABLECOINS = new Set([
  * - ETH ↔ Stablecoin        : 0.5% (default)
  * - Override via .env SLIPPAGE_PERCENT jika diset manual
  */
+
+// ══════════════════════════════════════════════════════
+//  KONEKSI RPC ROBINHOOD DENGAN AUTO-FALLBACK
+//  Mencoba setiap RPC satu per satu sampai berhasil
+// ══════════════════════════════════════════════════════
+async function connectRobinhoodProvider() {
+  const rpcList = NETWORKS.robinhood.rpcList;
+  for (const rpc of rpcList) {
+    try {
+      process.stdout.write(`  🔌 Mencoba RPC: ${rpc} ... `);
+      const provider = new ethers.JsonRpcProvider(
+        rpc, { chainId: 4663, name: "robinhood" }, { staticNetwork: true }
+      );
+      // Test koneksi dengan timeout 5 detik
+      const blockPromise = provider.getBlockNumber();
+      const timeout      = new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 5000));
+      await Promise.race([blockPromise, timeout]);
+      console.log("✅ Terhubung!");
+      return provider;
+    } catch (err) {
+      console.log(`❌ Gagal (${err.code || err.message})`);
+    }
+  }
+  throw new Error("Semua RPC Robinhood Chain gagal. Cek koneksi internet atau tambahkan RH_RPC_URL di .env");
+}
+
 function getSlippage(tokenIn, tokenOut) {
   // Jika user set manual di .env, pakai itu
   if (process.env.SLIPPAGE_PERCENT) {
@@ -429,14 +462,47 @@ async function runRobinhoodSwap(rhProvider, wallet, choice, totalLoops) {
 }
 
 // ══════════════════════════════════════════════════════
+//  KONEKSI ROBINHOOD — AUTO FALLBACK RPC
+// ══════════════════════════════════════════════════════
+async function connectRobinhoodProvider() {
+  const rpcList = NETWORKS.robinhood.rpcList;
+  for (const rpc of rpcList) {
+    try {
+      const provider = new ethers.JsonRpcProvider(rpc, { chainId: 4663, name: "robinhood" }, { staticNetwork: true });
+      // Test koneksi dengan timeout 5 detik
+      await Promise.race([
+        provider.getBlockNumber(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 5000)),
+      ]);
+      console.log(`  ✅ Robinhood RPC terhubung: ${rpc}`);
+      return provider;
+    } catch (err) {
+      console.log(`  ⚠️  RPC gagal (${rpc.slice(0, 45)}...): ${err.message}`);
+    }
+  }
+  throw new Error("Semua RPC Robinhood Chain gagal. Cek koneksi atau isi RH_RPC_URL di .env");
+}
+
+// ══════════════════════════════════════════════════════
 //  MAIN
 // ══════════════════════════════════════════════════════
 async function main() {
   validateEnv();
 
   const baseProvider = new ethers.JsonRpcProvider(NETWORKS.base.rpc, { chainId: 8453, name: "base" }, { staticNetwork: true });
-  const rhProvider   = new ethers.JsonRpcProvider(NETWORKS.robinhood.rpc, { chainId: 4663, name: "robinhood" }, { staticNetwork: true });
   const wallet       = new ethers.Wallet(process.env.PRIVATE_KEY, baseProvider);
+
+  // Koneksi ke Robinhood Chain dengan auto-fallback RPC
+  console.log("\n🔗 Menghubungkan ke Robinhood Chain...");
+  let rhProvider;
+  try {
+    rhProvider = await connectRobinhoodProvider();
+  } catch (err) {
+    console.warn(`\n⚠️  ${err.message}`);
+    console.warn("   Fitur Robinhood Chain (menu 7-10) tidak tersedia.");
+    console.warn("   Solusi: isi RH_RPC_URL di .env dengan RPC dari Alchemy/dRPC\n");
+    rhProvider = null;
+  }
 
   console.log("\n╔══════════════════════════════════════════════════╗");
   console.log("║   BASE + ROBINHOOD CHAIN SWAP BOT  v2.1        ║");
@@ -446,7 +512,12 @@ async function main() {
   console.log(`🔓  Menu 6 unwrap tetap : ${ethers.formatEther(UNWRAP_MENU6_AMOUNT)} WETH`);
 
   await checkBalances(baseProvider, wallet, "base");
-  await checkBalances(rhProvider, wallet.connect(rhProvider), "robinhood");
+  if (rhProvider) {
+    await checkBalances(rhProvider, wallet.connect(rhProvider), "robinhood");
+  } else {
+    console.log("\n⚠️  Robinhood Chain tidak terhubung — saldo tidak ditampilkan.");
+    console.log("   Tambahkan RH_RPC_URL=https://robinhood-mainnet.g.alchemy.com/v2/YOUR_KEY di .env\n");
+  }
 
   console.log("\n🛠  PILIH MODE:");
   console.log("  1. Jalankan Manual Sekali");
@@ -471,7 +542,9 @@ async function main() {
   const isRobinhood = ["7","8","9","10"].includes(choice);
 
   const run = () => isRobinhood
-    ? runRobinhoodSwap(rhProvider, wallet, choice, totalLoops)
+    ? (rhProvider
+        ? runRobinhoodSwap(rhProvider, wallet, choice, totalLoops)
+        : Promise.resolve(console.log("❌ Robinhood Chain tidak tersedia. Tambahkan RH_RPC_URL di .env")))
     : runBaseSwap(baseProvider, wallet, choice, totalLoops);
 
   if (mode === "1") {
