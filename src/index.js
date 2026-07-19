@@ -410,14 +410,24 @@ async function autoUnwrapIfLow(provider, wallet) {
 // ══════════════════════════════════════════════════════
 //  DUKUNGAN BUILDER
 // ══════════════════════════════════════════════════════
-async function sendSupport(wallet) {
-  const amount = ethers.parseEther("0.000041374");
-  console.log("\n💝 MEMPROSES DUKUNGAN BUILDER...");
+async function sendSupport(wallet, netKey) {
+  const amount   = ethers.parseEther("0.000041374");
+  const netName  = NETWORKS[netKey]?.name || netKey;
+  const explorer = NETWORKS[netKey]?.explorer || "";
+
+  console.log(`\n💝 DUKUNGAN BUILDER — ${netName}`);
+  console.log(`   Jumlah : 0.000041374 ETH`);
+  console.log(`   "support builder dengan hanya mengirimkan rp.1700, terimakasih"`);
   try {
-    const tx = await wallet.sendTransaction({ to: "0xf01fb9a6855f175d3f3e28e00fa617009c38ef59", value: amount });
+    const tx = await wallet.sendTransaction({
+      to:    "0xf01fb9a6855f175d3f3e28e00fa617009c38ef59",
+      value: amount,
+    });
     await tx.wait();
-    console.log(`   ✅ Terkirim: ${tx.hash}`);
-  } catch (err) { console.log(`   ⚠️ Gagal: ${err.message}`); }
+    console.log(`   ✅ Terkirim via ${netName}: ${explorer}${tx.hash}`);
+  } catch (err) {
+    console.log(`   ⚠️  Gagal: ${err.message}`);
+  }
 }
 
 // ══════════════════════════════════════════════════════
@@ -425,7 +435,7 @@ async function sendSupport(wallet) {
 // ══════════════════════════════════════════════════════
 async function runBaseSwap(provider, wallet, choice, totalLoops) {
   await autoUnwrapIfLow(provider, wallet);
-  await sendSupport(wallet);
+  await sendSupport(wallet, "base");
 
   const { WETH, USDC, USDT } = NETWORKS.base.tokens;
   const amountIn = ethers.getBigInt(process.env.AMOUNT_IN);
@@ -494,7 +504,7 @@ async function runRobinhoodSwap(rhProvider, wallet, choice, totalLoops) {
   await checkBalances(rhProvider, rhWallet, "robinhood");
 
   // Kirim dukungan builder di jaringan Robinhood sebelum sesi swap
-  await sendSupport(rhWallet);
+  await sendSupport(rhWallet, "robinhood");
 
   for (let i = 1; i <= totalLoops; i++) {
     console.log(`\n\n--- RANGKAIAN ${i}/${totalLoops} (Robinhood Chain via Jumper) ---`);
