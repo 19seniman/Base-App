@@ -1,6 +1,6 @@
 # 🔵 Base Network & Robinhood Chain Swap Bot
 
-Bot Node.js untuk melakukan swap/trade token di **Base Network** menggunakan **Uniswap V3**.
+Bot Node.js untuk melakukan swap/trade token di **Base Network** menggunakan **Uniswap V3**,Use the 1.1.1.1 VPN or another VPN if you encounter an **RPC error with Robinhood**
 
 ---
 
